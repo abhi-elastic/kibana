@@ -44,6 +44,19 @@ telemetry.tracing.exporters.phoenix.public_url: 'http://localhost:6006/'
 telemetry.tracing.exporters.phoenix.project_name: '1chat'
 ```
 
+### Opik (Comet)
+
+To export traces to [Comet Opik Cloud](https://www.comet.com/opik):
+
+```yaml
+telemetry.enabled: true
+telemetry.tracing.enabled: true
+
+telemetry.tracing.exporters.opik.api_key: '{your opik api key}'
+telemetry.tracing.exporters.opik.workspace_name: '{your comet workspace}'
+telemetry.tracing.exporters.opik.project_name: '{your project name}'
+```
+
 ## Overview
 
 The agentBuilder plugin exposes APIs to interact with agentBuilder primitives.

@@ -11,6 +11,8 @@ import { core, node, tracing } from '@elastic/opentelemetry-node/sdk';
 import {
   EVAL_RUN_ID_BAGGAGE_KEY,
   LangfuseSpanProcessor,
+  MlflowSpanProcessor,
+  OpikSpanProcessor,
   PhoenixSpanProcessor,
 } from '@kbn/inference-tracing';
 import { fromExternalVariant } from '@kbn/std';
@@ -110,6 +112,14 @@ export function initTracing({
 
       case 'phoenix':
         LateBindingSpanProcessor.get().register(new PhoenixSpanProcessor(variant.value));
+        break;
+
+      case 'opik':
+        LateBindingSpanProcessor.get().register(new OpikSpanProcessor(variant.value));
+        break;
+
+      case 'mlflow':
+        LateBindingSpanProcessor.get().register(new MlflowSpanProcessor(variant.value));
         break;
 
       case 'grpc':

@@ -57,10 +57,59 @@ export interface InferenceTracingPhoenixExportConfig {
 }
 
 /**
+ * Configuration schema for the Opik exporter (Comet Opik Cloud).
+ */
+export interface InferenceTracingOpikExportConfig {
+  /**
+   * The API key for Comet Opik Cloud.
+   */
+  api_key: string;
+  /**
+   * The Comet workspace name.
+   */
+  workspace_name: string;
+  /**
+   * The project name in Opik.
+   */
+  project_name: string;
+  /**
+   * The delay in milliseconds before the exporter sends another
+   * batch of spans.
+   */
+  scheduled_delay: number;
+}
+
+/**
+ * Configuration schema for the MLflow exporter.
+ */
+export interface InferenceTracingMlflowExportConfig {
+  /**
+   * The MLflow tracking server URL (e.g. http://localhost:5000).
+   */
+  tracking_uri: string;
+  /**
+   * The MLflow experiment ID. Required by the OTLP endpoint
+   * via the `x-mlflow-experiment-id` header.
+   */
+  experiment_id: string;
+  /**
+   * Optional experiment name, used for trace URL logging.
+   */
+  experiment_name?: string;
+  /**
+   * The delay in milliseconds before the exporter sends another
+   * batch of spans.
+   */
+  scheduled_delay: number;
+}
+
+/**
  * Configuration schema for inference tracing exporters.
  *
  * @internal
  */
 export type InferenceTracingExportConfig =
   | { langfuse: InferenceTracingLangfuseExportConfig }
-  | { phoenix: InferenceTracingPhoenixExportConfig };
+  | { phoenix: InferenceTracingPhoenixExportConfig }
+  | { opik: InferenceTracingOpikExportConfig }
+  | { mlflow: InferenceTracingMlflowExportConfig };

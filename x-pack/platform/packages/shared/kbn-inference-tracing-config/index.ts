@@ -8,6 +8,8 @@
 export type {
   InferenceTracingExportConfig,
   InferenceTracingLangfuseExportConfig,
+  InferenceTracingMlflowExportConfig,
+  InferenceTracingOpikExportConfig,
   InferenceTracingPhoenixExportConfig,
 } from './types';
 

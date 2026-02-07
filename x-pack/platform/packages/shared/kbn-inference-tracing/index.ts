@@ -12,4 +12,6 @@ export { GenAISemanticConventions, ElasticGenAIAttributes } from './src/types';
 export { EVAL_RUN_ID_BAGGAGE_KEY } from './src/baggage';
 
 export { LangfuseSpanProcessor } from './src/langfuse/langfuse_span_processor';
+export { MlflowSpanProcessor } from './src/mlflow/mlflow_span_processor';
+export { OpikSpanProcessor } from './src/opik/opik_span_processor';
 export { PhoenixSpanProcessor } from './src/phoenix/phoenix_span_processor';

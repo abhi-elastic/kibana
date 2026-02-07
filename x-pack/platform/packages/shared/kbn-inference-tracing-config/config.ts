@@ -9,6 +9,8 @@ import { schema } from '@kbn/config-schema';
 import type {
   InferenceTracingExportConfig,
   InferenceTracingLangfuseExportConfig,
+  InferenceTracingMlflowExportConfig,
+  InferenceTracingOpikExportConfig,
   InferenceTracingPhoenixExportConfig,
 } from './types';
 
@@ -34,11 +36,31 @@ const phoenixExportConfigSchema: Type<InferenceTracingPhoenixExportConfig> = sch
   scheduled_delay: scheduledDelay,
 });
 
+const opikExportConfigSchema: Type<InferenceTracingOpikExportConfig> = schema.object({
+  api_key: schema.string(),
+  workspace_name: schema.string(),
+  project_name: schema.string(),
+  scheduled_delay: scheduledDelay,
+});
+
+const mlflowExportConfigSchema: Type<InferenceTracingMlflowExportConfig> = schema.object({
+  tracking_uri: schema.uri(),
+  experiment_id: schema.string(),
+  experiment_name: schema.maybe(schema.string()),
+  scheduled_delay: scheduledDelay,
+});
+
 export const inferenceTracingExportConfigSchema: Type<InferenceTracingExportConfig> = schema.oneOf([
   schema.object({
     langfuse: langfuseExportConfigSchema,
   }),
   schema.object({
     phoenix: phoenixExportConfigSchema,
+  }),
+  schema.object({
+    opik: opikExportConfigSchema,
+  }),
+  schema.object({
+    mlflow: mlflowExportConfigSchema,
   }),
 ]);

@@ -15,9 +15,6 @@ import { resolveResource } from './utils/resources';
 export type RelevanceSearchResponse = PerformMatchSearchResponse;
 
 const SEARCHABLE_TEXT_FIELD_TYPES = new Set([
-  'match_only_text',
-  'pattern_text',
-  'semantic_text',
   'text',
 ]);
 
