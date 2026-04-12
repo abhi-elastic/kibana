@@ -5,9 +5,20 @@
  * 2.0.
  */
 
-import { defer, switchMap, identity } from 'rxjs';
+import { defer, switchMap, identity, tap } from 'rxjs';
 import type { Observable } from 'rxjs';
 import type { Logger } from '@kbn/logging';
+import { appendFileSync } from 'fs';
+
+const REASONING_LOG = '/tmp/reasoning_debug.log';
+const debugLog = (msg: string) => {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try {
+    appendFileSync(REASONING_LOG, line);
+  } catch {
+    // ignore
+  }
+};
 import type {
   FunctionCallingMode,
   Message,
@@ -30,6 +41,17 @@ import {
 } from '../../simulated_function_calling';
 import type { InferenceEndpointExecutor } from '../../utils/inference_endpoint_executor';
 import type { OpenAIRequest } from '../openai/types';
+
+interface ReasoningConfig {
+  effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none';
+  max_tokens?: number;
+  enabled?: boolean;
+  exclude?: boolean;
+}
+
+type EndpointRequest = OpenAIRequest & { reasoning?: ReasoningConfig };
+
+const HARDCODED_REASONING: ReasoningConfig = { effort: 'xhigh' };
 
 export interface InferenceEndpointAdapterChatCompleteOptions {
   executor: InferenceEndpointExecutor;
@@ -78,6 +100,8 @@ export const inferenceEndpointAdapter = {
       modelName,
     });
 
+    debugLog(`request reasoning config: ${JSON.stringify(request.reasoning)}`);
+
     return defer(() =>
       executor.invoke({
         body: request as unknown as Record<string, unknown>,
@@ -87,6 +111,24 @@ export const inferenceEndpointAdapter = {
       })
     ).pipe(
       switchMap((stream) => eventSourceStreamIntoObservable(stream)),
+      tap((line) => {
+        if (!line || line === '[DONE]') return;
+        try {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          const delta = (parsed.choices as Array<{ delta?: Record<string, unknown> }>)?.[0]?.delta;
+          if (delta?.reasoning || delta?.reasoning_details) {
+            debugLog(
+              `delta: reasoning=${JSON.stringify(delta.reasoning)}, reasoning_details=${JSON.stringify(delta.reasoning_details)}`
+            );
+          }
+          const usage = parsed.usage as Record<string, unknown> | undefined;
+          if (usage) {
+            debugLog(`usage: ${JSON.stringify(usage)}`);
+          }
+        } catch {
+          // ignore parse failures — processOpenAIStream handles errors
+        }
+      }),
       processOpenAIStream(),
       emitTokenCountEstimateIfMissing({ request }),
       useSimulatedFunctionCalling ? parseInlineFunctionCalls({ logger }) : identity
@@ -110,7 +152,7 @@ const createEndpointRequest = ({
   simulatedFunctionCalling: boolean;
   temperature?: number;
   modelName?: string;
-}): OpenAIRequest => {
+}): EndpointRequest => {
   if (simulatedFunctionCalling) {
     const wrapped = wrapWithSimulatedFunctionCalling({
       system,
@@ -122,6 +164,7 @@ const createEndpointRequest = ({
       ...(temperature >= 0 ? { temperature } : {}),
       model: modelName,
       messages: messagesToOpenAI({ system: wrapped.system, messages: wrapped.messages }),
+      reasoning: HARDCODED_REASONING,
     };
   }
 
@@ -138,5 +181,6 @@ const createEndpointRequest = ({
           tools: openAiTools,
         }
       : {}),
+    reasoning: HARDCODED_REASONING,
   };
 };
