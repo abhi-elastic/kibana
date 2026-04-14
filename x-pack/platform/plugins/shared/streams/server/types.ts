@@ -58,6 +58,7 @@ export interface StreamsServer {
   taskManager: TaskManagerStartContract;
   memoryTriggerRegistry?: MemoryTriggerRegistry;
   ensureMemorySkillRegistered?: () => void;
+  ensureConversationMemorySkillRegistered?: () => void;
   ensureMemoryTasksScheduled?: () => Promise<void>;
   searchInferenceEndpoints?: SearchInferenceEndpointsPluginStart;
 }

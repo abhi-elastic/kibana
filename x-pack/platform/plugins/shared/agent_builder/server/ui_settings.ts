@@ -11,6 +11,7 @@ import { i18n } from '@kbn/i18n';
 import {
   AGENT_BUILDER_NAV_ENABLED_SETTING_ID,
   AGENT_BUILDER_EXPERIMENTAL_FEATURES_SETTING_ID,
+  AGENT_BUILDER_ENABLE_MEMORY_SETTING_ID,
 } from '@kbn/management-settings-ids';
 
 export const registerUISettings = ({ uiSettings }: { uiSettings: UiSettingsServiceSetup }) => {
@@ -38,6 +39,19 @@ export const registerUISettings = ({ uiSettings }: { uiSettings: UiSettingsServi
       ),
       name: i18n.translate('xpack.agentBuilder.uiSettings.experimentalFeatures.name', {
         defaultMessage: 'Elastic Agent Builder: Experimental Features',
+      }),
+      schema: schema.boolean(),
+      value: false,
+      technicalPreview: true,
+      requiresPageReload: false,
+      readonly: false,
+    },
+    [AGENT_BUILDER_ENABLE_MEMORY_SETTING_ID]: {
+      description: i18n.translate('xpack.agentBuilder.uiSettings.enableMemory.description', {
+        defaultMessage: 'Enable persistent cross-conversation memory for Elastic Agent Builder.',
+      }),
+      name: i18n.translate('xpack.agentBuilder.uiSettings.enableMemory.name', {
+        defaultMessage: 'Elastic Agent Builder: Memory',
       }),
       schema: schema.boolean(),
       value: false,

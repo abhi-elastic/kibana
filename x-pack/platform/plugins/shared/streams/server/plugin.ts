@@ -17,6 +17,7 @@ import type {
 import { DEFAULT_APP_CATEGORIES } from '@kbn/core/server';
 import { i18n } from '@kbn/i18n';
 import {
+  AGENT_BUILDER_ENABLE_MEMORY_SETTING_ID,
   OBSERVABILITY_STREAMS_ENABLE_MEMORY,
   OBSERVABILITY_STREAMS_ENABLE_WIRED_STREAM_VIEWS,
 } from '@kbn/management-settings-ids';
@@ -268,9 +269,21 @@ export class StreamsPlugin
             return false;
           }
         },
+        isABMemoryEnabled: async () => {
+          try {
+            const [coreStart] = await core.getStartServices();
+            const soClient = coreStart.savedObjects.createInternalRepository();
+            const uiSettings = coreStart.uiSettings.asScopedToClient(soClient);
+            return await uiSettings.get<boolean>(AGENT_BUILDER_ENABLE_MEMORY_SETTING_ID);
+          } catch {
+            return false;
+          }
+        },
       })
-        .then(({ ensureMemorySkillRegistered }) => {
+        .then(({ ensureMemorySkillRegistered, ensureConversationMemorySkillRegistered }) => {
           this.server!.ensureMemorySkillRegistered = ensureMemorySkillRegistered;
+          this.server!.ensureConversationMemorySkillRegistered =
+            ensureConversationMemorySkillRegistered;
         })
         .catch((err) => {
           this.logger.error(`Failed to register agent builder: ${err.message}`);
