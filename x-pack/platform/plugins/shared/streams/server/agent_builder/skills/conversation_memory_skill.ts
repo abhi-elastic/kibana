@@ -53,11 +53,12 @@ export const createConversationMemorySkill = (
     - **memory_search** — Search memory by keyword. Returns snippets only (not full content). Use this first to find relevant pages before reading. Supports filtering by category or referenced page.
     - **memory_read** — Read the full content of a specific page by name or ID. Supports heading/line-range targeting for large pages.
     - **memory_write** — Create a new page or overwrite an existing one. Provide a name, title, categories, and markdown content.
-    - **memory_patch** — Make surgical edits to an existing page. Each operation must use exactly one of three modes:
-      - **(A) Search-and-replace**: provide \`old_text\` (exact text to find) and optionally \`new_text\` (replacement; omit \`new_text\` to delete the matched text).
-      - **(B) Heading replace**: provide \`heading\` (e.g. "## Schedule") and \`content\` (new body for that section; use empty string \`""\` to clear the section).
-      - **(C) Append**: provide \`append\` (text to add), optionally with \`heading\` to append under a specific section.
-      Every operation MUST include at least one of \`old_text\`, \`heading\`+\`content\`, or \`append\`. Any other combination will be rejected.
+    - **memory_patch** — Make surgical edits to an existing page. **Always memory_read the page first** so you reference current headings and text exactly. The call requires \`operations\` (an array of 1–20 ops) and \`change_summary\` (a string). Each operation object must use exactly one of three modes:
+      - **(A) Search-and-replace**: \`{ "old_text": "exact match", "new_text": "replacement" }\` — omit \`new_text\` to delete.
+      - **(B) Heading replace**: \`{ "heading": "## Section Name", "content": "new body" }\` — use \`""\` to clear.
+      - **(C) Append**: \`{ "append": "text to add" }\` — optionally add \`"heading": "## Section"\` to append under that section.
+      **Correct call structure**: \`{ "name": "page-name", "operations": [ { "append": "new line" } ], "change_summary": "Added new line" }\`
+      **Common mistakes to avoid**: Do NOT put old_text/new_text/append at the top level — they MUST be inside the \`operations\` array. Do NOT omit \`change_summary\`. Do NOT mix modes in a single operation object.
     - **memory_list** — Browse memory pages by category, or view the full category tree. Returns metadata only (names, titles, categories). Use to discover what exists.
     - **memory_delete** — Delete a memory page. Always confirm with the user before deleting.
     - **memory_recent_changes** — View recent changes across all memory pages. Shows what was changed, by whom, and when. Useful for reviewing recent activity and identifying pages that may need attention.
@@ -89,7 +90,9 @@ export const createConversationMemorySkill = (
 
     <best_practices>
     - Search before writing — avoid creating duplicates
+    - **Always memory_read a page before using memory_patch** — headings and text must match exactly what is currently stored, not what you remember from earlier
     - Use memory_patch for small edits, memory_write for new pages or full rewrites
+    - If memory_patch fails with "Heading not found" or "Text not found", re-read the page and retry with the correct current content
     - Keep pages focused — one topic per page, split large documents
     - Include context in change summaries so the version history is useful
     - When updating pages, preserve existing content and add to it rather than replacing

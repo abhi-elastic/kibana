@@ -26,7 +26,11 @@ export const createSigEventsMemorySkill = (options: MemoryToolsOptions) =>
     - **memory_search** — Search memory by keyword. Returns snippets only (not full content). Use this first to find relevant pages before reading. Supports filtering by category or referenced page.
     - **memory_read** — Read the full content of a specific page by name or ID. Supports heading/line-range targeting for large pages.
     - **memory_write** — Create a new page or overwrite an existing one. Provide a name, title, categories, and markdown content.
-    - **memory_patch** — Make surgical edits to an existing page using search-and-replace. Preferred over memory_write for small changes because it avoids echoing the full document.
+    - **memory_patch** — Make surgical edits to an existing page. Each operation must use exactly one of three modes:
+      - **(A) Search-and-replace**: provide \`old_text\` (exact text to find) and optionally \`new_text\` (replacement; omit \`new_text\` to delete the matched text).
+      - **(B) Heading replace**: provide \`heading\` (e.g. "## Schedule") and \`content\` (new body for that section; use empty string \`""\` to clear the section).
+      - **(C) Append**: provide \`append\` (text to add), optionally with \`heading\` to append under a specific section.
+      Every operation MUST include at least one of \`old_text\`, \`heading\`+\`content\`, or \`append\`. Any other combination will be rejected.
     - **memory_list** — Browse memory pages by category, or view the full category tree. Returns metadata only (names, titles, categories). Use to discover what exists.
     - **memory_delete** — Delete a memory page. Always confirm with the user before deleting.
     - **memory_recent_changes** — View recent changes across all memory pages. Shows what was changed, by whom, and when. Useful for reviewing recent activity and identifying pages that may need attention.

@@ -13,6 +13,7 @@ import { firstValueFrom, toArray } from 'rxjs';
 import type { ServerSentEvent } from '@kbn/sse-utils';
 import { observableIntoEventSourceStream, cloudProxyBufferSize } from '@kbn/sse-utils-server';
 import type { KibanaRequest } from '@kbn/core-http-server';
+import { ensureRawRequest } from '@kbn/core-http-router-server-internal';
 import type { ConversationUpdatedEvent, ConversationCreatedEvent } from '@kbn/agent-builder-common';
 import {
   agentBuilderDefaultAgentId,
@@ -34,6 +35,12 @@ import type { RouteDependencies } from './types';
 import { getHandlerWrapper } from './wrap_handler';
 import { AGENT_SOCKET_TIMEOUT_MS } from './utils';
 import converseAsyncDescription from './oas/converse_async.text';
+
+const extendAgentSocketTimeout = (request: KibanaRequest) => {
+  const rawRequest = ensureRawRequest(request);
+  rawRequest.raw.req.setTimeout?.(AGENT_SOCKET_TIMEOUT_MS);
+  rawRequest.raw.res.setTimeout?.(AGENT_SOCKET_TIMEOUT_MS);
+};
 
 export function registerChatRoutes({
   router,
@@ -345,6 +352,8 @@ export function registerChatRoutes({
         },
       },
       wrapHandler(async (ctx, request, response) => {
+        extendAgentSocketTimeout(request);
+
         const { execution: executionService } = getInternalServices();
         const payload: ChatRequestBodyPayload = request.body as ChatRequestBodyPayload;
 
@@ -417,6 +426,8 @@ export function registerChatRoutes({
         },
       },
       wrapHandler(async (ctx, request, response) => {
+        extendAgentSocketTimeout(request);
+
         const [, { cloud }] = await coreSetup.getStartServices();
         const { execution: executionService } = getInternalServices();
         const payload: ChatRequestBodyPayload = request.body as ChatRequestBodyPayload;

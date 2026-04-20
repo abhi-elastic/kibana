@@ -191,7 +191,6 @@ export const createMemoryPatchTool = ({
 
       for (const op of operations) {
         if (op.old_text !== undefined) {
-          // Search-and-replace
           const result = applySearchReplace(currentContent, op.old_text, op.new_text);
           if (result.applied) {
             currentContent = result.content;
@@ -200,7 +199,6 @@ export const createMemoryPatchTool = ({
             errors.push(result.error!);
           }
         } else if (op.heading && op.content !== undefined) {
-          // Heading-level replace
           const result = applyHeadingReplace(currentContent, op.heading, op.content);
           if (result.applied) {
             currentContent = result.content;
@@ -209,7 +207,6 @@ export const createMemoryPatchTool = ({
             errors.push(result.error!);
           }
         } else if (op.append) {
-          // Append
           const result = applyAppend(currentContent, op.append, op.heading);
           if (result.applied) {
             currentContent = result.content;
@@ -222,11 +219,11 @@ export const createMemoryPatchTool = ({
         }
       }
 
-      if (errors.length > 0) {
+      if (appliedCount === 0) {
         return {
           results: [
             createErrorResult({
-              message: `Patch failed — all operations rolled back. Errors: ${errors.join('; ')}`,
+              message: `Patch failed — no operations could be applied. Errors: ${errors.join('; ')}. Re-read the page with memory_read and retry with current content.`,
             }),
           ],
         };
@@ -239,17 +236,23 @@ export const createMemoryPatchTool = ({
         changeSummary,
       });
 
+      const data: Record<string, unknown> = {
+        id: updated.id,
+        name: updated.name,
+        version: updated.version,
+        operations_applied: appliedCount,
+      };
+      if (errors.length > 0) {
+        data.operations_skipped = errors.length;
+        data.skipped_errors = errors;
+      }
+
       return {
         results: [
           {
             tool_result_id: getToolResultId(),
             type: ToolResultType.other,
-            data: {
-              id: updated.id,
-              name: updated.name,
-              version: updated.version,
-              operations_applied: appliedCount,
-            },
+            data,
           },
         ],
       };
@@ -268,14 +271,16 @@ export const createMemoryPatchTool = ({
     const result = toolReturn.results[0];
     if (!isOtherResult(result)) return undefined;
     const data = result.data as Record<string, unknown>;
+    const skipped = data.operations_skipped ? `, ${data.operations_skipped} skipped` : '';
     return [
       {
         ...result,
         data: {
-          summary: `Patched memory page "${data.name}" (${data.operations_applied} ops, v${data.version})`,
+          summary: `Patched memory page "${data.name}" (${data.operations_applied} ops applied${skipped}, v${data.version})`,
           id: data.id,
           name: data.name,
           version: data.version,
+          ...(data.skipped_errors ? { skipped_errors: data.skipped_errors } : {}),
         },
       },
     ];
