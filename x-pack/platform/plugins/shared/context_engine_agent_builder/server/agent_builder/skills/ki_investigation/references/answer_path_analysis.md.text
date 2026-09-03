@@ -1,0 +1,66 @@
+# Source answer-path analysis
+
+You know two things: the data, and the probes the user confirmed. You do not know the production
+agent's prompt, tools or access path. The findings are hypotheses about how any agent with generic
+access would struggle; each one is tied to a measured number.
+
+Every ES|QL call goes through `platform.core.execute_esql`; every mapping through
+`platform.core.get_index_mapping`. `<source>` below is the configured source verbatim: an index or
+pattern becomes `FROM <index>`; an ES|QL source is used as written.
+
+## 1. Orientation (once per configured source)
+
+- `get_index_mapping` for the index or pattern (for an ES|QL source, the index in its `FROM`).
+- `<source> | LIMIT 5` for a row sample. Note the id-like fields, timestamp fields, `text` fields,
+  and fields that look like foreign keys (same name appears in another source's mapping).
+
+## 2. Probes (cap 5)
+
+Draft up to 5 questions the production agent would be asked, from the AI index description and
+the row samples. In `traces` and `both` modes offer the top T12 task shapes instead of drafts. Ask
+with `ask_user_question`, free text allowed: "These are the questions I will measure the data
+against. Edit, remove or add (5 at most)." The confirmed set is the probe list; give each a
+`probe_id` (`p1`..`p5`).
+
+## 3. Access-mode question (once, skip when `access_mode` is already set)
+
+Exact wording: "How does your agent reach this data? This decides what the KIs should contain.
+(a) It runs queries itself (ES|QL, search or MCP tools against these indices): KIs can carry index
+names, field names and ready-to-run queries. (b) It only reads text it is given (a retrieval tool,
+files, a knowledge base): KIs must carry the facts themselves; queries and index names would be
+useless to it. (c) Not sure: we assume text-only, the safer default." Store `queries`,
+`text_only` or `unknown` (treated as text-only).
+
+## 4. Per probe: answer path and six measured properties
+
+Write the answer path as ordered one-liners ("case record in `raw-cases`; 40-300 feed events per
+case in `raw-feeds` joined on `case_id`; KB articles in `raw-kb` referenced by id inside feed
+text"). Then measure, each with the exact call, and record every value as a `measurements` entry
+(`measurement_id` `m<n>`, `kind` from the list, `subject` the index or field, `values`).
+
+| kind | how to measure | finding kind when the scale gate passes |
+|---|---|---|
+| `spread` | indices on the path; join key exists when the same field name is in both mappings and `FROM <a> \| WHERE key IS NOT NULL \| STATS v = VALUES(key) \| LIMIT 1` sampled values are found on the other side with `FROM <b> \| WHERE key IN (<values>) \| STATS n = COUNT()` | `spread_without_join_key` |
+| `fan_out` | `FROM <index> \| STATS c = COUNT() BY <unit_key> \| STATS units = COUNT(), med = MEDIAN(c), p95 = PERCENTILE(c, 95)` | `consolidation_cost` |
+| `reading_cost` | `text` fields on the path: `FROM <index> \| LIMIT 1000 \| STATS avg_len = AVG(LENGTH(<field>)), max_len = MAX(LENGTH(<field>))` | `reading_cost` |
+| `discovery_risk` | pairwise Jaccard of top-level field names between mappings in scope (> 0.5 is overlapping), near-identical index names (shared prefix, one token different), fields without descriptions; count how many indices in scope could hold each probe's answer | `discovery_risk` |
+| `query_risk` | same field with different types across the pattern, `counter_*` fields, multi-valued fields on filter paths, `nested` objects, `ignore_above` on fields the probe would search | `query_risk` |
+| `freshness` | `FROM <index> \| STATS latest = MAX(@timestamp), earliest = MIN(@timestamp)`; an update timestamp field or a second sample with changed values means units change after creation | none (decides `static` vs `cursor` later) |
+
+Answerability is recorded on the probe (`answerable: true/false`) with the query used;
+`unanswerable` probes are a `probe_unanswerable` finding (hypothesized, `scale` over probes).
+
+## 5. Scale gate
+
+`ki_eligible` when `affected_units >= max(2, 20% of total_units)`: indices for `discovery_risk`
+and `query_risk`; entities (units of the fan-out key) for `consolidation_cost`; probes for
+`spread_without_join_key`, `reading_cost` and `probe_unanswerable` (2 of at most 5 probes is the
+floor). State it on the finding: "affects 12 of 40 indices". Below the gate the property stays a
+measurement, not a finding, unless the user promotes it.
+
+## 6. Output per probe
+
+One sentence per probe: answer path, properties touched (each named with its `glossary.md`
+meaning the first time it appears in the message), and the hypothesized difficulty for a generic
+agent tied to one measured number. `text_only` access mode: any finding whose fact is an
+index name or a query is `ki_usefulness: unlikely` by rule.

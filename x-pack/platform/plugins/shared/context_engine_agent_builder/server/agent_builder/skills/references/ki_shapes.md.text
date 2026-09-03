@@ -1,0 +1,85 @@
+# KI document shape
+
+A Knowledge Indicator (KI) is one document in an AI index. Agents retrieve KIs at question time
+instead of scanning raw data. Every KI is written through `context-engine.createKi` (never by
+indexing into the backing store), so the workflow must produce this shape itself.
+
+## Base fields (the `ki` object passed to `createKi`)
+
+| Field | Type | Purpose |
+|---|---|---|
+| `type` | keyword | KI kind, the top-level discriminator. Family KIs use the family name in snake_case (e.g. `index_profile`, `case_summary`); targeted KIs use their `ki_type`. |
+| `title` | text + semantic | Short display name, the primary semantic surface. Sibling KIs must not share a title; put the discriminator (unit id, product, window) in it. |
+| `description` | text + semantic | Routing heuristic: when to use this KI, what it does not cover, key fields, joins. Carries the differentiating signal when titles are similar. |
+| `content` | text + semantic | The knowledge itself: facts, summary, questions answered, and access patterns as prose. |
+| `tags` | keyword[] | Filter facets. Always include `plan:<plan_item_id>`; `finding:<finding_id>` for targeted KIs; `signal` on the signals copy. |
+| `attributes` | flattened | Structured, keyword-queryable metadata: every filterable value, every quality field, provenance and the ES|QL the KI carries. Values are strings, numbers, booleans or string arrays; no nested objects. Never declare bespoke mappings. |
+
+`@timestamp` is set by `createKi`; the document id comes from `ki_id`. Do not pass either inside
+`ki`.
+
+## Inside `attributes`
+
+| Field | Purpose |
+|---|---|
+| `attributes.plan_id` | String: the `plan_item_id` the KI was produced for. Required on every planned KI; the `provenance-present` verifier checks it together with one of the next three. |
+| `attributes.source_query` | The ES|QL that enumerated or fetched the unit (family KIs), or that measured the finding (targeted KIs from a hypothesized finding). One string, or a non-empty array of strings when more than one query produced the KI. Never an empty string or empty array. |
+| `attributes.trace_ids` | Non-empty string array of the sample trace ids behind a targeted KI from an observed finding. Omit the field rather than passing an empty array. |
+| `attributes.finding_id` | String: the finding a targeted KI answers. On its own it satisfies provenance, so a targeted KI from a hypothesized finding needs no `source_query` unless a query is worth recording. |
+| `attributes.investigation_id` | Optional: the investigation the plan belongs to. |
+| `attributes.index` | Optional: the index or index pattern the KI is about. When present, the `index-exists` verifier resolves it. |
+| `attributes.esql` | String or string[]: every runnable ES|QL the KI carries. The ES|QL verifiers read this field; omit only when the KI carries no query. Query-ready KIs put their queries here and repeat them in `content`. |
+| `attributes.confidence` | 0-1 calibrated correctness: 0.9+ explicit evidence; 0.7-0.89 strong corroborated pattern; 0.5-0.69 clear indicators with ambiguity; 0.3-0.49 weak inference (also tag `inferred`); below 0.3 do not emit. |
+| `attributes.evidence` | 2-5 short strings quoting observed values (`field=value (n / total)`), or the finding's counts and sample trace ids for targeted KIs. |
+| `attributes.expires_at` | ISO date about 30 days out for anything that can drift. Omit for durable facts (a constraint of the query language, a resolved case's root cause). |
+| `attributes.unit_key` / `attributes.unit_id` | For family KIs: the unit field and this unit's value, so agents can filter by unit. |
+| `attributes.readiness` | `routing_only` or `query_ready`, copied from the family. |
+| `attributes.excluded` | Boolean soft-exclude. |
+
+Structured facts belong in both places: as prose inside `content` (semantic retrieval) and as
+fields inside `attributes` (exact match and filters).
+
+## Access patterns (inside `content`, and the queries in `attributes.esql`)
+
+Only when the strategy's access mode is `queries`. Parameterised templates for
+fill-in-the-blank question classes, complete runnable queries for named conditions. Every field
+name comes from the real mapping; end examples with a small `LIMIT`.
+
+```
+Access patterns:
+  Q: Status of a specific support case
+  ESQL: FROM raw-cases | WHERE case_number == ?case_number | KEEP status, priority | LIMIT 1
+  params: case_number (keyword, e.g. "02115676")
+  returns: status, priority for one case
+```
+
+## Targeted KI types (authored by the planner from an accepted finding)
+
+One KI per `create_ki*` decision. `type` is the `ki_type`; `tags` include `finding:<id>`;
+`attributes.finding_id` is set; `attributes.evidence` quotes the finding's counts and
+sample trace ids. In `text_only` access mode the content carries the fact itself and never an
+index name or a query as the answer.
+
+- `constraint`: what cannot be done and the boundary. Title names the tool or operation and the
+  limit ("ES|QL on logs-app: `message` is text, not aggregatable"). Content: the exact error
+  class seen, the operation that fails, when it applies. Durable; no `expires_at`.
+- `workaround`: constraint plus the working alternative, with the runnable form in
+  `attributes.esql` when access mode is `queries` ("use `CATEGORIZE(message)` or filter with
+  `message : "..."`"). Durable.
+- `disambiguation`: which of several similar indices or fields answers which question, with the
+  discriminating field values. Content lists each candidate and its use; `attributes.esql` holds
+  one probe query per candidate when queries are allowed. Expires.
+- `task_recipe`: the step order that succeeded for a recurring task shape: which index first,
+  which filter, what to skip. Content is numbered steps; `attributes.esql` holds the queries in
+  order. Expires.
+- `fact`: a self-contained answer for `text_only` agents ("Case 02115676 was resolved by
+  rotating the API key on 2026-08-03"). Durable when the fact is immutable, otherwise expires.
+
+## Family KI (one per unit of the approved family)
+
+`type` = family name; `title` = "<family label>: <unit id>"; `attributes.unit_key`,
+`attributes.unit_id`, `attributes.readiness`, `attributes.plan_id`, `attributes.source_query`; `ki_id` =
+`<family_id>/<normalised unit id>` so re-runs replace instead of duplicating. Content carries
+what the strategy said one KI carries for this unit: mechanical fields copied from the unit's
+documents, an `ai.prompt` synthesis when `extraction` is `llm`. Access patterns only when
+`readiness` is `query_ready`.

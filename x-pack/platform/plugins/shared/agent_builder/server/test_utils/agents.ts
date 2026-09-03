@@ -74,6 +74,7 @@ export const createAgentsServiceStartMock = (): AgentsServiceStartMock => {
     ensure: jest.fn(),
     resolveAgentConfiguration: jest.fn(),
     resolveAgentBaseConfiguration: jest.fn().mockResolvedValue({}),
+    getAgentType: jest.fn().mockReturnValue(undefined),
     removeToolRefsFromAgents: jest.fn(),
     getAgentsUsingTools: jest.fn(),
     removePluginRefsFromAgents: jest.fn(),

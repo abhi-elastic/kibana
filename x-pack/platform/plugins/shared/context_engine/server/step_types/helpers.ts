@@ -131,6 +131,70 @@ export const withKiVerificationTelemetry = async ({
   }
 };
 
+const KI_OBJECT_HINT =
+  'Pass the KI as a typed object: `ki: "${{ steps.build_ki.output.ki }}"` (or `"${{ foreach.item.ki }}"`), not `{{ ... }}` or `{{ ... | json }}`, which render it as text.';
+
+const BOOLEAN_STRINGS: Record<string, boolean> = { true: true, false: false };
+
+/**
+ * The workflow engine renders `with` values without validating them against the step schema, so
+ * a `ki` written with `{{ }}` arrives as a string and a boolean written with `{{ }}` arrives as
+ * `"true"`. This repairs what can be repaired (a JSON string, a boolean string) and fails with a
+ * message that names the fix for everything else, instead of letting a TypeError surface from
+ * inside a verifier.
+ */
+export const normalizeKiStepInput = <Input extends { ki?: unknown }>(
+  input: Input,
+  { stepTypeId, booleanFields = [] }: { stepTypeId: string; booleanFields?: (keyof Input)[] }
+): Input => {
+  const normalized: Record<string, unknown> = { ...input };
+  const { ki } = input;
+
+  if (typeof ki === 'string') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(ki);
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed === undefined || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new ExecutionError({
+        type: 'ValidationError',
+        message: `${stepTypeId}: \`ki\` arrived as a string ("${ki.slice(0, 60)}${
+          ki.length > 60 ? '…' : ''
+        }"), not an object. ${KI_OBJECT_HINT}`,
+        details: { stepTypeId, receivedType: 'string' },
+      });
+    }
+    normalized.ki = parsed;
+  } else if (ki === undefined || ki === null) {
+    throw new ExecutionError({
+      type: 'ValidationError',
+      message: `${stepTypeId}: \`ki\` is ${
+        ki === null ? 'null' : 'undefined'
+      }. The expression it points to resolved to nothing; check the step or variable name (\`data.set\` keys live directly under \`with\` and are read as \`variables.<key>\`). ${KI_OBJECT_HINT}`,
+      details: { stepTypeId, receivedType: ki === null ? 'null' : 'undefined' },
+    });
+  } else if (typeof ki !== 'object' || Array.isArray(ki)) {
+    throw new ExecutionError({
+      type: 'ValidationError',
+      message: `${stepTypeId}: \`ki\` must be an object, received ${
+        Array.isArray(ki) ? 'an array' : typeof ki
+      }. ${KI_OBJECT_HINT}`,
+      details: { stepTypeId, receivedType: Array.isArray(ki) ? 'array' : typeof ki },
+    });
+  }
+
+  for (const field of booleanFields) {
+    const value = normalized[field as string];
+    if (typeof value === 'string' && value.trim().toLowerCase() in BOOLEAN_STRINGS) {
+      normalized[field as string] = BOOLEAN_STRINGS[value.trim().toLowerCase()];
+    }
+  }
+
+  return normalized as Input;
+};
+
 /** Fails the step when the workflow user lacks the Context Engine write API privilege. */
 export const assertKiWritePrivilege = async (
   checkWritePrivilege: (request: KibanaRequest) => Promise<boolean>,

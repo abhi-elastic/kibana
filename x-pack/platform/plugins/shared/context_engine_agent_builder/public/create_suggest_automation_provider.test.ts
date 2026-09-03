@@ -10,6 +10,10 @@ import type { AgentBuilderPluginStart } from '@kbn/agent-builder-browser';
 import { coreMock } from '@kbn/core/public/mocks';
 import type { GetAiIndexResponse } from '@kbn/context-engine-plugin/common/http_api/ai_indices';
 import { BehaviorSubject, Subject } from 'rxjs';
+import {
+  CONTEXT_ENGINE_AGENT_ENSURE_PATH,
+  CONTEXT_ENGINE_AGENT_ID,
+} from '../common/agent_builder_agents';
 import { AI_INDEX_ATTACHMENT_TYPE } from '../common/agent_builder_attachments';
 import { KI_AUTOMATION_GENERATION_SKILL_ID } from '../common/agent_builder_skills';
 import { CONTEXT_ENGINE_SAVE_AUTOMATION_TOOL_ID } from '../common/agent_builder_tools';
@@ -53,15 +57,17 @@ const createProvider = ({
       } as unknown as AgentBuilderPluginStart)
     : undefined;
 
-  const application = coreMock.createStart().application;
+  const core = coreMock.createStart();
+  const { application, http } = core;
   application.capabilities = {
     ...application.capabilities,
     agentBuilder: { show: hasPrivilege },
   };
+  http.post.mockResolvedValue({ agent_id: CONTEXT_ENGINE_AGENT_ID, space_id: 'default' });
 
-  const provider = createSuggestAutomationProvider({ agentBuilder, application });
+  const provider = createSuggestAutomationProvider({ agentBuilder, application, http });
 
-  return { provider, openChat, chatEvents$, getChatEvents$ };
+  return { provider, openChat, chatEvents$, getChatEvents$, http };
 };
 
 describe('createSuggestAutomationProvider', () => {
@@ -89,15 +95,20 @@ describe('createSuggestAutomationProvider', () => {
     expect(provider.canSuggest({ aiIndex, isManaged: false })).toBe(false);
   });
 
-  it('opens agent builder chat with the AI index attachment', () => {
-    const { provider, openChat } = createProvider();
+  it('opens agent builder chat on the Context Engine agent with the AI index attachment', async () => {
+    const { provider, openChat, http } = createProvider();
 
-    provider.suggestAutomation({ aiIndex, onSaved: jest.fn() });
+    await provider.suggestAutomation({ aiIndex, onSaved: jest.fn() });
 
+    expect(http.post).toHaveBeenCalledWith(
+      CONTEXT_ENGINE_AGENT_ENSURE_PATH,
+      expect.objectContaining({ version: '1' })
+    );
     expect(openChat).toHaveBeenCalledWith(
       expect.objectContaining({
         newConversation: true,
         autoSendInitialMessage: false,
+        agentId: CONTEXT_ENGINE_AGENT_ID,
         initialMessage: expect.stringMatching(
           new RegExp(
             `\\[\\/${KI_AUTOMATION_GENERATION_SKILL_ID}\\]\\(skill://${KI_AUTOMATION_GENERATION_SKILL_ID}\\).*When an ai_index attachment is present`,

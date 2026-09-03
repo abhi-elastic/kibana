@@ -17,6 +17,7 @@ import {
   MAX_AI_INDEX_SOURCE_VALUE_LENGTH,
   aiIndexByIdPath,
   aiIndexFeedbackAnalysisPath,
+  aiIndexInvestigationScopePath,
   aiIndexKiByIdPath,
   aiIndexKiListPath,
   aiIndexPath,
@@ -32,6 +33,7 @@ import {
   KiNotFoundError,
 } from '../ai_indices/errors';
 import type { AiIndexService } from '../ai_indices/service';
+import type { FindingsServiceApi } from '../findings/service';
 import type { ImprovementsServiceApi } from '../improvements/service';
 
 interface RegisteredRoute {
@@ -92,9 +94,13 @@ const kiBackingIndex = '.ds-ai-index-ds-customer_support-2026.01.01-000001';
 describe('ai indices routes', () => {
   let routes: Record<string, RegisteredRoute>;
   let aiIndexService: jest.Mocked<
-    Pick<AiIndexService, 'create' | 'put' | 'get' | 'list' | 'delete' | 'setFeedbackAnalysis'>
+    Pick<
+      AiIndexService,
+      'create' | 'put' | 'get' | 'list' | 'delete' | 'setFeedbackAnalysis' | 'setInvestigationScope'
+    >
   >;
   let improvementsService: jest.Mocked<Pick<ImprovementsServiceApi, 'deleteByAiIndex'>>;
+  let findingsService: jest.Mocked<Pick<FindingsServiceApi, 'deleteByAiIndex'>>;
   let response: ReturnType<typeof httpServerMock.createResponseFactory>;
   let featureFlagEnabled: boolean;
   let actionsClient: ReturnType<typeof actionsClientMock.create>;
@@ -102,6 +108,7 @@ describe('ai indices routes', () => {
   let auditLogger: { log: jest.Mock };
   let esSearch: jest.Mock;
   let esGet: jest.Mock;
+  let esqlQuery: jest.Mock;
   let improvementsClients: unknown[];
   const logger = loggerMock.create();
 
@@ -117,6 +124,7 @@ describe('ai indices routes', () => {
             asCurrentUser: {
               search: esSearch,
               get: esGet,
+              esql: { query: esqlQuery },
             },
           },
         },
@@ -141,6 +149,7 @@ describe('ai indices routes', () => {
     auditLogger = { log: jest.fn() };
     esSearch = jest.fn();
     esGet = jest.fn();
+    esqlQuery = jest.fn().mockResolvedValue({ columns: [], values: [] });
     aiIndexService = {
       create: jest.fn(),
       put: jest.fn(),
@@ -148,8 +157,10 @@ describe('ai indices routes', () => {
       list: jest.fn(),
       delete: jest.fn(),
       setFeedbackAnalysis: jest.fn(),
+      setInvestigationScope: jest.fn(),
     };
     improvementsService = { deleteByAiIndex: jest.fn().mockResolvedValue(undefined) };
+    findingsService = { deleteByAiIndex: jest.fn().mockResolvedValue(undefined) };
     improvementsClients = [];
 
     const createVersionedRoute = (method: string) => (config: RegisteredRoute['config']) => ({
@@ -182,6 +193,7 @@ describe('ai indices routes', () => {
         improvementsClients.push(esClient);
         return improvementsService as unknown as ImprovementsServiceApi;
       },
+      getFindingsService: () => findingsService as unknown as FindingsServiceApi,
       getActions: async () => actions,
     });
   });
@@ -208,8 +220,13 @@ describe('ai indices routes', () => {
       params: { aiIndexId: 'a' },
       body: { enabled: true },
     });
+    await callRoute('PUT', aiIndexInvestigationScopePath, {
+      params: { aiIndexId: 'a' },
+      body: { mode: 'sources' },
+    });
 
-    expect(response.notFound).toHaveBeenCalledTimes(8);
+    expect(response.notFound).toHaveBeenCalledTimes(9);
+    expect(aiIndexService.setInvestigationScope).not.toHaveBeenCalled();
     expect(aiIndexService.create).not.toHaveBeenCalled();
     expect(aiIndexService.put).not.toHaveBeenCalled();
     expect(aiIndexService.get).not.toHaveBeenCalled();
@@ -290,6 +307,31 @@ describe('ai indices routes', () => {
 
       expect(response.badRequest).toHaveBeenCalledWith({
         body: { message: "dest.value 'customer_support*' is not allowed" },
+      });
+    });
+
+    it('validates ES|QL sources with a LIMIT 0 execution before creating', async () => {
+      aiIndexService.create.mockResolvedValue(undefined);
+
+      await callRoute('POST', aiIndexPath, { body: postBody });
+
+      expect(esqlQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: 'FROM ai-index-ds-customer_support | LIMIT 10 | LIMIT 0',
+        })
+      );
+      expect(aiIndexService.create).toHaveBeenCalled();
+    });
+
+    it('returns 400 without creating when an ES|QL source does not parse', async () => {
+      await callRoute('POST', aiIndexPath, {
+        body: { ...postBody, sources: [{ type: 'esql', value: 'FROM | WHERE' }] },
+      });
+
+      expect(aiIndexService.create).not.toHaveBeenCalled();
+      expect(esqlQuery).not.toHaveBeenCalled();
+      expect(response.badRequest).toHaveBeenCalledWith({
+        body: { message: expect.stringContaining('is invalid') },
       });
     });
 
@@ -732,6 +774,7 @@ describe('ai indices routes', () => {
       });
 
       expect(improvementsService.deleteByAiIndex).toHaveBeenCalledWith('customer_support');
+      expect(findingsService.deleteByAiIndex).toHaveBeenCalledWith('customer_support');
     });
 
     it('audits the deletion even when the improvements cleanup fails afterwards', async () => {
@@ -827,6 +870,98 @@ describe('ai indices routes', () => {
       });
 
       expect(response.conflict).toHaveBeenCalled();
+    });
+  });
+
+  describe('PUT /internal/context_engine/ai_index/{aiIndexId}/investigation_scope', () => {
+    const investigationScope = {
+      mode: 'both' as const,
+      trace: { agent_id: 'support-agent', time_range: { from: 'now-7d', to: 'now' } },
+    };
+
+    it('registers as an internal write route', () => {
+      expect(getRoute('PUT', aiIndexInvestigationScopePath).config).toMatchObject({
+        access: 'internal',
+        security: { authz: { requiredPrivileges: [apiPrivileges.writeContextEngine] } },
+      });
+    });
+
+    it('stores the scope and returns what was stored', async () => {
+      aiIndexService.setInvestigationScope.mockResolvedValue(investigationScope);
+
+      await callRoute('PUT', aiIndexInvestigationScopePath, {
+        params: { aiIndexId: 'customer_support' },
+        body: investigationScope,
+      });
+
+      expect(aiIndexService.setInvestigationScope).toHaveBeenCalledWith(
+        'customer_support',
+        investigationScope
+      );
+      expect(response.ok).toHaveBeenCalledWith({
+        body: { investigation_scope: investigationScope },
+      });
+    });
+
+    it('returns 404 when the AI index does not exist', async () => {
+      aiIndexService.setInvestigationScope.mockRejectedValue(new AiIndexNotFoundError('missing'));
+
+      await callRoute('PUT', aiIndexInvestigationScopePath, {
+        params: { aiIndexId: 'missing' },
+        body: investigationScope,
+      });
+
+      expect(response.notFound).toHaveBeenCalled();
+    });
+
+    describe('body validation', () => {
+      const validateBody = (body: unknown) => {
+        const { validate } = getRoute('PUT', aiIndexInvestigationScopePath);
+        if (validate === false || !validate.request?.body) {
+          throw new Error('Expected a body schema');
+        }
+        return validate.request.body.validate(body);
+      };
+
+      it('accepts a sources-only scope without a trace block', () => {
+        expect(validateBody({ mode: 'sources' })).toEqual({ mode: 'sources' });
+      });
+
+      it('accepts a draft: a trace mode without a trace block yet', () => {
+        expect(validateBody({ mode: 'traces' })).toEqual({ mode: 'traces' });
+        expect(validateBody({ mode: 'both' })).toEqual({ mode: 'both' });
+      });
+
+      it('accepts a draft: a time range with no agent id or custom ES|QL yet', () => {
+        expect(
+          validateBody({ mode: 'traces', trace: { time_range: { from: 'now-7d', to: 'now' } } })
+        ).toEqual({ mode: 'traces', trace: { time_range: { from: 'now-7d', to: 'now' } } });
+      });
+
+      it('accepts a custom ES|QL trace selection', () => {
+        expect(
+          validateBody({
+            mode: 'traces',
+            trace: {
+              esql: 'FROM traces-agent_builder.otel-default | LIMIT 100',
+              time_range: { from: '2026-01-01T00:00:00.000Z', to: 'now' },
+            },
+          })
+        ).toMatchObject({ mode: 'traces' });
+      });
+
+      it('rejects a time boundary that is neither date math nor an ISO date', () => {
+        expect(() =>
+          validateBody({
+            mode: 'traces',
+            trace: { agent_id: 'a', time_range: { from: 'last tuesday', to: 'now' } },
+          })
+        ).toThrow(/date math/);
+      });
+
+      it('rejects an unknown mode', () => {
+        expect(() => validateBody({ mode: 'everything' })).toThrow();
+      });
     });
   });
 

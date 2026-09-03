@@ -18,7 +18,17 @@ export { KiVerifierRegistry } from './registry';
 export { KiVerificationService } from './service';
 export { createKiVerifierRegistry } from './create_registry';
 export {
+  createEsqlExecutesVerifier,
   createEsqlValidSyntaxVerifier,
+  createIndexExistsVerifier,
+  createProvenancePresentVerifier,
+  createSchemaShapeVerifier,
   ESQL_ATTRIBUTE_KEY,
+  ESQL_EXECUTES_VERIFIER_ID,
   ESQL_VALID_SYNTAX_VERIFIER_ID,
+  INDEX_ATTRIBUTE_KEY,
+  INDEX_EXISTS_VERIFIER_ID,
+  PLAN_ID_ATTRIBUTE_KEY,
+  PROVENANCE_PRESENT_VERIFIER_ID,
+  SCHEMA_SHAPE_VERIFIER_ID,
 } from './verifiers';

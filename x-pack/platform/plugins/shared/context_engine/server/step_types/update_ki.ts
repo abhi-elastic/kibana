@@ -7,13 +7,14 @@
 
 import { createServerStepDefinition } from '@kbn/workflows-extensions/server';
 import { isResponseError } from '@kbn/es-errors';
-import { updateKiStepCommonDefinition } from '../../common/step_types/update_ki';
+import { UPDATE_KI_STEP_ID, updateKiStepCommonDefinition } from '../../common/step_types/update_ki';
 import type { KiStepDependencies } from './helpers';
 import {
   assertContextEngineEnabled,
   assertKiWritePrivilege,
   findKiBackingIndex,
   kiNotFoundError,
+  normalizeKiStepInput,
   resolveAiIndex,
   withKiWriteTelemetry,
 } from './helpers';
@@ -31,7 +32,11 @@ export const getUpdateKiStepDefinition = ({
       const request = context.contextManager.getFakeRequest();
       await assertContextEngineEnabled(isContextEngineEnabled, request);
 
-      const { ai_index_id: aiIndexId, ki_id: kiId, ki } = context.input;
+      const {
+        ai_index_id: aiIndexId,
+        ki_id: kiId,
+        ki,
+      } = normalizeKiStepInput(context.input, { stepTypeId: UPDATE_KI_STEP_ID });
       return withKiWriteTelemetry({
         action: 'update',
         aiIndexId,

@@ -13,7 +13,16 @@ import type { SpacesPluginStart } from '@kbn/spaces-plugin/public';
 import type { TriggersAndActionsUIPublicPluginStart } from '@kbn/triggers-actions-ui-plugin/public';
 import type { WorkflowsExtensionsPublicPluginSetup } from '@kbn/workflows-extensions/public';
 import type { AttachmentInput } from '@kbn/agent-builder-common/attachments';
-import type { AiIndexHttpItem, GetAiIndexResponse } from '../common/http_api/ai_indices';
+import type {
+  AiIndexHttpItem,
+  AiIndexInvestigationScope,
+  GetAiIndexResponse,
+} from '../common/http_api/ai_indices';
+import type {
+  PreviewSourcesResponse,
+  TraceScopePreviewResponse,
+} from '../common/http_api/investigation_scope';
+import type { InvestigationStage } from '../common/investigation';
 import type { ContextEngineAppChromeAdapter } from './app_chrome_adapter';
 
 /**
@@ -58,9 +67,40 @@ export interface SuggestAutomationProvider {
   subscribeToAutomationSaved: (aiIndexId: string, onSaved: () => void) => () => void;
 }
 
-/** Suggest-automation hooks registered by context_engine_agent_builder. */
+export interface RunInvestigationParams {
+  aiIndex: GetAiIndexResponse;
+  scope: AiIndexInvestigationScope;
+  /** Deterministic preview of the ES|QL sources, when the user ran it. */
+  sourcePreview?: PreviewSourcesResponse;
+  /** Bounded trace counts for the selected agent or custom scope, when available. */
+  tracePreview?: TraceScopePreviewResponse;
+}
+
+/** Progress events surfaced from the Agent Builder conversation to the Overview page. */
+export type InvestigationEvent =
+  | { type: 'stage'; stage: InvestigationStage; investigationId?: string }
+  | { type: 'automation_saved'; workflowId: string };
+
+/** Powers the "Run investigation in Agent Builder" button. */
+export interface InvestigationProvider {
+  canRun: (params: { aiIndex: GetAiIndexResponse | undefined }) => boolean;
+  runInvestigation: (params: RunInvestigationParams) => void | Promise<void>;
+  /** Subscribe to investigation progress for an AI index. Returns unsubscribe. */
+  subscribeToInvestigationEvents: (
+    aiIndexId: string,
+    onEvent: (event: InvestigationEvent) => void
+  ) => () => void;
+}
+
+/** Agent Builder hooks registered by context_engine_agent_builder. */
 export interface AgentBuilderIntegration {
   suggestAutomation: SuggestAutomationProvider;
+  investigation?: InvestigationProvider;
+  /**
+   * Create-if-absent install of the shared Context Engine agent in the current space, resolving
+   * to its id, or `undefined` when it could not be ensured. Used by every Context Engine hand-off.
+   */
+  ensureAgentId?: () => Promise<string | undefined>;
 }
 
 export interface ContextEnginePluginSetup {

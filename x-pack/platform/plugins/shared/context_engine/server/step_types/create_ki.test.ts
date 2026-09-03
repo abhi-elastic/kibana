@@ -10,7 +10,12 @@ import { ExecutionError } from '@kbn/workflows/server';
 import type { AiIndexService } from '../ai_indices/service';
 import { AiIndexAlreadyExistsError, AiIndexNotFoundError } from '../ai_indices/errors';
 import { getCreateKiStepDefinition } from './create_ki';
-import { createMockStepContext, mockAiIndexService, mockKiStepTelemetry } from './test_utils';
+import {
+  createMockStepContext,
+  mockAiIndexService,
+  mockKiStepTelemetry,
+  mockVerificationService,
+} from './test_utils';
 
 const kiInput = {
   type: 'index_metadata',
@@ -35,6 +40,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const result = await handler(context);
 
@@ -47,6 +53,50 @@ describe('getCreateKiStepDefinition', () => {
       },
       { signal: context.abortSignal }
     );
+  });
+
+  it('parses a KI rendered as a JSON string and writes the object', async () => {
+    const esClient = { index: jest.fn().mockResolvedValue({ _id: 'ki-1' }) };
+    const context = createMockStepContext({
+      input: { ai_index_id: 'my-ai-index', ki: JSON.stringify(kiInput) },
+      esClient,
+    });
+    const service = mockAiIndexService({ type: 'index', value: 'ai-index-idx-my-ai-index' });
+
+    const { handler } = getCreateKiStepDefinition({
+      getAiIndexService: () => service,
+      isContextEngineEnabled: enabled,
+      checkWritePrivilege: allowed,
+      ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
+    });
+    await handler(context);
+
+    expect(esClient.index).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document: expect.objectContaining({ ...kiInput, '@timestamp': expect.any(String) }),
+      }),
+      { signal: context.abortSignal }
+    );
+  });
+
+  it('fails with the typed-expression hint when the KI is not an object', async () => {
+    const esClient = { index: jest.fn() };
+    const context = createMockStepContext({
+      input: { ai_index_id: 'my-ai-index', ki: '[object Object]' },
+      esClient,
+    });
+
+    const { handler } = getCreateKiStepDefinition({
+      getAiIndexService: () => mockAiIndexService({ type: 'index', value: 'idx' }),
+      isContextEngineEnabled: enabled,
+      checkWritePrivilege: allowed,
+      ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
+    });
+
+    await expect(handler(context)).rejects.toThrow(/`ki` arrived as a string/);
+    expect(esClient.index).not.toHaveBeenCalled();
   });
 
   it('uses op_type create for a data stream dest', async () => {
@@ -62,6 +112,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     await handler(context);
 
@@ -84,6 +135,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const result = await handler(context);
 
@@ -107,6 +159,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const thrown = await handler(context).catch((e) => e);
 
@@ -129,6 +182,7 @@ describe('getCreateKiStepDefinition', () => {
         isContextEngineEnabled: enabled,
         checkWritePrivilege: allowed,
         ...mockKiStepTelemetry(),
+        verificationService: mockVerificationService(),
       });
       const thrown = await handler(context).catch((e) => e);
 
@@ -154,6 +208,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const result = await handler(context);
 
@@ -191,6 +246,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const result = await handler(context);
 
@@ -217,6 +273,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const thrown = await handler(context).catch((e) => e);
 
@@ -240,6 +297,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: async () => false,
       checkWritePrivilege: allowed,
       ...telemetry,
+      verificationService: mockVerificationService(),
     });
     const thrown = await handler(context).catch((e) => e);
 
@@ -263,6 +321,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const thrown = await handler(context).catch((e) => e);
 
@@ -286,6 +345,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...telemetry,
+      verificationService: mockVerificationService(),
     });
     await handler(context);
 
@@ -315,6 +375,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...telemetry,
+      verificationService: mockVerificationService(),
     });
     await handler(context);
 
@@ -336,6 +397,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: jest.fn().mockResolvedValue(false),
       ...telemetry,
+      verificationService: mockVerificationService(),
     });
     await handler(context).catch(() => {});
 
@@ -369,6 +431,7 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...telemetry,
+      verificationService: mockVerificationService(),
     });
     await expect(handler(context)).rejects.toThrow('Request aborted');
 
@@ -397,9 +460,106 @@ describe('getCreateKiStepDefinition', () => {
       isContextEngineEnabled: enabled,
       checkWritePrivilege: allowed,
       ...mockKiStepTelemetry(),
+      verificationService: mockVerificationService(),
     });
     const thrown = await handler(context).catch((e) => e);
 
     expect(thrown).toBe(cause);
+  });
+
+  describe('verify flag', () => {
+    it('does not run the verifiers unless verify is true', async () => {
+      const esClient = { index: jest.fn().mockResolvedValue({ _id: 'ki-1' }) };
+      const context = createMockStepContext({
+        input: { ai_index_id: 'my-ai-index', ki: kiInput },
+        esClient,
+      });
+      const verificationService = mockVerificationService();
+
+      const { handler } = getCreateKiStepDefinition({
+        getAiIndexService: () =>
+          mockAiIndexService({ type: 'index', value: 'ai-index-idx-my-ai-index' }),
+        isContextEngineEnabled: enabled,
+        checkWritePrivilege: allowed,
+        ...mockKiStepTelemetry(),
+        verificationService,
+      });
+      await handler(context);
+
+      expect(verificationService.verifyKi).not.toHaveBeenCalled();
+      expect(esClient.index).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs the registry before writing and reports the verification', async () => {
+      const esClient = { index: jest.fn().mockResolvedValue({ _id: 'ki-1' }) };
+      const context = createMockStepContext({
+        input: { ai_index_id: 'my-ai-index', ki: kiInput, verify: true },
+        esClient,
+      });
+      const telemetry = mockKiStepTelemetry();
+      const verificationService = mockVerificationService({
+        passed: true,
+        results: [{ verifier: 'schema-shape', passed: true }],
+      });
+
+      const { handler } = getCreateKiStepDefinition({
+        getAiIndexService: () =>
+          mockAiIndexService({ type: 'index', value: 'ai-index-idx-my-ai-index' }),
+        isContextEngineEnabled: enabled,
+        checkWritePrivilege: allowed,
+        ...telemetry,
+        verificationService,
+      });
+      const result = await handler(context);
+
+      expect(result).toEqual({ output: { id: 'ki-1' } });
+      expect(verificationService.verifyKi).toHaveBeenCalledWith(kiInput, {
+        isEnabled: true,
+        esClient,
+        logger: telemetry.logger,
+        abortSignal: context.abortSignal,
+      });
+      expect(telemetry.analyticsService.reportKiVerification).toHaveBeenCalledWith({
+        outcome: 'success',
+        passed: true,
+        verifiersRun: 1,
+        failedVerifierIds: [],
+      });
+    });
+
+    it('throws KiVerificationError and skips the write when a verifier fails', async () => {
+      const esClient = { index: jest.fn() };
+      const context = createMockStepContext({
+        input: { ai_index_id: 'my-ai-index', ki: kiInput, verify: true },
+        esClient,
+      });
+      const verificationService = mockVerificationService({
+        passed: false,
+        results: [
+          { verifier: 'schema-shape', passed: true },
+          {
+            verifier: 'provenance-present',
+            passed: false,
+            reason: 'attributes.plan_id is required',
+          },
+        ],
+      });
+
+      const { handler } = getCreateKiStepDefinition({
+        getAiIndexService: () =>
+          mockAiIndexService({ type: 'index', value: 'ai-index-idx-my-ai-index' }),
+        isContextEngineEnabled: enabled,
+        checkWritePrivilege: allowed,
+        ...mockKiStepTelemetry(),
+        verificationService,
+      });
+      const thrown = await handler(context).catch((e) => e);
+
+      expect(thrown).toBeInstanceOf(ExecutionError);
+      expect(thrown.type).toBe('KiVerificationError');
+      expect(thrown.message).toContain('provenance-present: attributes.plan_id is required');
+      expect(thrown.message).not.toContain('schema-shape');
+      expect(esClient.index).not.toHaveBeenCalled();
+    });
   });
 });

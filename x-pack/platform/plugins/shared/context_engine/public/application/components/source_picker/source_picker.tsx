@@ -6,6 +6,7 @@
  */
 
 import {
+  EuiAccordion,
   EuiFlexGroup,
   EuiFlexItem,
   EuiIcon,
@@ -14,7 +15,9 @@ import {
   EuiTab,
   EuiTabs,
   EuiTitle,
+  useGeneratedHtmlId,
 } from '@elastic/eui';
+import { i18n } from '@kbn/i18n';
 import { FormattedMessage } from '@kbn/i18n-react';
 import React, { useMemo, useState } from 'react';
 import { useDataConnectors } from '../../hooks/use_data_connectors';
@@ -22,6 +25,7 @@ import { getSourceDisplay } from '../source_display';
 import { SourceRow } from '../source_row';
 import { ConnectorsTab } from './connectors_tab';
 import { EsqlTab } from './esql_tab';
+import { IndexPickerTab } from './index_picker_tab';
 import type { SelectedSource } from './types';
 
 type TabId = 'esql' | 'connectors';
@@ -33,6 +37,7 @@ interface SourcePickerProps {
 
 export const SourcePicker = ({ selectedSources, onChange }: SourcePickerProps) => {
   const [selectedTab, setSelectedTab] = useState<TabId>('esql');
+  const esqlAccordionId = useGeneratedHtmlId({ prefix: 'contextSourcePickerEsql' });
 
   const hasSelectedConnectorSources = useMemo(
     () => selectedSources.some((source) => source.type === 'connector'),
@@ -96,7 +101,7 @@ export const SourcePicker = ({ selectedSources, onChange }: SourcePickerProps) =
         <EuiTab
           isSelected={selectedTab === 'esql'}
           onClick={() => setSelectedTab('esql')}
-          prepend={<EuiIcon type="commandLine" aria-hidden={true} />}
+          prepend={<EuiIcon type="indexOpen" aria-hidden={true} />}
           append={
             selectedEsqlCount > 0 ? (
               <EuiNotificationBadge>{selectedEsqlCount}</EuiNotificationBadge>
@@ -106,7 +111,7 @@ export const SourcePicker = ({ selectedSources, onChange }: SourcePickerProps) =
         >
           <FormattedMessage
             id="xpack.contextEngine.sourcePicker.tabs.esql"
-            defaultMessage="ES|QL"
+            defaultMessage="Elasticsearch data"
           />
         </EuiTab>
         <EuiTab
@@ -129,7 +134,22 @@ export const SourcePicker = ({ selectedSources, onChange }: SourcePickerProps) =
 
       <EuiSpacer size="m" />
 
-      {selectedTab === 'esql' && <EsqlTab onAdd={addEsqlSource} />}
+      {selectedTab === 'esql' && (
+        <>
+          <IndexPickerTab onAdd={addEsqlSource} />
+          <EuiSpacer size="m" />
+          <EuiAccordion
+            id={esqlAccordionId}
+            buttonContent={i18n.translate('xpack.contextEngine.sourcePicker.esql.advanced', {
+              defaultMessage: 'Advanced: ES|QL',
+            })}
+            data-test-subj="contextSourcePickerEsqlAccordion"
+          >
+            <EuiSpacer size="s" />
+            <EsqlTab onAdd={addEsqlSource} />
+          </EuiAccordion>
+        </>
+      )}
       {selectedTab === 'connectors' && (
         <ConnectorsTab
           connectors={connectors}

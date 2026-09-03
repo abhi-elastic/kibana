@@ -18,6 +18,26 @@ export const contextEngineQueryKeys = {
     list: () => ['context_engine', 'connectors', 'list'] as const,
     types: () => ['context_engine', 'connectors', 'types'] as const,
   },
+  investigationScope: {
+    traceAgents: (from: string, to: string) =>
+      ['context_engine', 'investigation_scope', 'trace_agents', from, to] as const,
+    traceScopePreview: (from: string, to: string, agentId: string, esql: string) =>
+      [
+        'context_engine',
+        'investigation_scope',
+        'trace_scope_preview',
+        from,
+        to,
+        agentId,
+        esql,
+      ] as const,
+    indexSuggestions: (prefix: string) =>
+      ['context_engine', 'investigation_scope', 'index_suggestions', prefix] as const,
+  },
+  investigations: {
+    latest: (aiIndexId: string) =>
+      ['context_engine', 'investigations', aiIndexId, 'latest'] as const,
+  },
   signals: {
     groups: () => ['context_engine', 'signals', 'groups'] as const,
     byTag: (tag: string, from: number, size: number) =>

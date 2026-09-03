@@ -25,6 +25,11 @@ export interface KiVerifierContext {
   esClient: ElasticsearchClient;
   logger: Logger;
   abortSignal?: AbortSignal;
+  /**
+   * Opt-in for verifiers that run the KI's ES|QL against the cluster (`esql-executes`). Off by
+   * default because it costs a query per KI; the static syntax check always runs.
+   */
+  executeEsql?: boolean;
 }
 
 /**
@@ -43,8 +48,8 @@ export type KiVerifierResult = KiVerifierOutcome & { verifier: string };
 
 export interface KiVerifier {
   readonly id: string;
-  /** Whether this verifier has anything to check for the given KI. */
-  applies(ki: KnowledgeIndicator): boolean;
+  /** Whether this verifier has anything to check for the given KI (and run options). */
+  applies(ki: KnowledgeIndicator, context?: KiVerifierContext): boolean;
   verify(ki: KnowledgeIndicator, context: KiVerifierContext): Promise<KiVerifierOutcome>;
 }
 

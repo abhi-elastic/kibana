@@ -1,0 +1,42 @@
+# Confidence, impact and KI usefulness
+
+Three labels per finding, each with a one-sentence reason. Confidence and prevalence are separate
+axes: a single explicit tool error is Confirmed but rare; a soft failure in 15% of requests is
+Strong and prevalent. Only the second is KI material by default.
+
+## Confidence (`confirmed` / `strong` / `suggestive`)
+
+- `confirmed`: an explicit tool or model error (`status.code == "Error"`, a `{"type":"error"}`
+  result), or a repeat with an identical signature across two or more requests.
+- `strong`: a repeat pattern plus a cohort contrast that isolates the difference (the cohort
+  reached the answer with fewer steps or a different target), or a content-derived signature in
+  2+ requests with at least one similar request that succeeded.
+- `suggestive`: a timing, token or count anomaly with no explicit failure; anything classified
+  `unclear` because content was absent; anything from a `limited` sample band unless the row's
+  `confidence_cap` says `confirmed`.
+- Insufficient sample (`band: insufficient`): record what fired as `suggestive`, say in the
+  summary that the sample is below the planning floor, and set `ki_usefulness: unlikely`. It is
+  reported, never planned.
+
+The `confidence_cap` on each `trace_checks` signature is a ceiling, never a floor.
+
+## Impact (`high` / `medium` / `low`)
+
+- `high`: the request failed or the final answer was wrong or missing for the user (T1/T2 with no
+  recovery, T5 followed by an answer, T6, T10).
+- `medium`: the answer arrived but cost several extra steps, a long wait or a large token bill
+  (T3/T4 loops that recovered, T7, T8).
+- `low`: cosmetic or infrastructural, or the user would not notice (T9 handled elsewhere,
+  `multi_step_task`).
+
+## KI usefulness (`likely` / `possible` / `unlikely`)
+
+Read prevalence or scale first.
+
+- `likely`: the gate passes and you can name a retrievable fact that would have changed the
+  failing step (observed) or removed the measured cost (hypothesized): a constraint ("field X is
+  not aggregatable, use Y"), a mapping fact, a recovery pattern, a task-to-index route.
+- `possible`: the gate passes but the fact is uncertain, or the fact is clear but the pattern sits
+  just above the gate.
+- `unlikely`: the pattern is rare, model-bound (T7 model-dominated, T8), infrastructural (T9), or
+  `multi_step_task`; or `access_mode` is `text_only` and the fact is a query or an index name.

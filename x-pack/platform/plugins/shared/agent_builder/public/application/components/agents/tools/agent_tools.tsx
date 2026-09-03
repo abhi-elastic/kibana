@@ -33,7 +33,7 @@ import { useNavigation } from '../../../hooks/use_navigation';
 import { useToolsService } from '../../../hooks/tools/use_tools';
 import { useAgentBuilderAgentById } from '../../../hooks/agents/use_agent_by_id';
 import { useFlyoutState } from '../../../hooks/use_flyout_state';
-import { getActiveTools } from '../../../utils/tool_selection_utils';
+import { getActiveTools, getInheritedToolIdSet } from '../../../utils/tool_selection_utils';
 import { ActiveItemRow } from '../common/active_item_row';
 import { ToolLibraryPanel } from './tool_library_panel';
 import { ToolCreateFlyout } from './tool_create_flyout';
@@ -41,6 +41,7 @@ import { ToolDetailPanel } from './tool_detail_panel';
 import { PageWrapper } from '../common/page_wrapper';
 import { useListDetailPageStyles } from '../common/styles';
 import { useCanUpdateAgent } from '../../../hooks/agents/use_can_update_agent';
+import { useAgentTypeBase } from '../../../hooks/agents/use_agent_type_base';
 import { ToolsCustomizeEmptyState } from './tools_customize_empty_state';
 import { useToolsMutation } from './use_tools_mutation';
 
@@ -50,6 +51,7 @@ const ActiveToolsList: React.FC<{
   selectedToolId: string | null;
   enableElasticCapabilities: boolean;
   defaultToolIdSet: Set<string>;
+  inheritedToolIdSet: ReadonlySet<string>;
   isRemoving: boolean;
   onSelect: (id: string) => void;
   onRemove: (tool: ToolDefinition) => void;
@@ -60,6 +62,7 @@ const ActiveToolsList: React.FC<{
   selectedToolId,
   enableElasticCapabilities,
   defaultToolIdSet,
+  inheritedToolIdSet,
   isRemoving,
   onSelect,
   onRemove,
@@ -81,6 +84,7 @@ const ActiveToolsList: React.FC<{
     <>
       {filteredActiveTools.map((tool) => {
         const isBuiltIn = defaultToolIdSet.has(tool.id);
+        const isInherited = inheritedToolIdSet.has(tool.id);
         const isAutoIncluded = enableElasticCapabilities && isBuiltIn;
         return (
           <EuiFlexItem key={tool.id} grow={false}>
@@ -93,7 +97,11 @@ const ActiveToolsList: React.FC<{
               isRemoving={isRemoving}
               removeAriaLabel={labels.agentTools.removeToolAriaLabel}
               readOnlyContent={
-                isAutoIncluded ? (
+                isInherited ? (
+                  <EuiBadge color="hollow" data-test-subj={`agentBuilderInheritedTool-${tool.id}`}>
+                    {labels.agentTools.inheritedFromTypeBadge}
+                  </EuiBadge>
+                ) : isAutoIncluded ? (
                   <EuiBadge color="hollow">
                     {labels.agentTools.elasticCapabilitiesReadOnlyBadge}
                   </EuiBadge>
@@ -125,6 +133,7 @@ export const AgentTools: React.FC = () => {
 
   const { agent, isLoading: agentLoading } = useAgentBuilderAgentById(agentId);
   const { tools: allTools, isLoading: toolsLoading } = useToolsService();
+  const { typeBase } = useAgentTypeBase(agentId);
   const canEditAgent = useCanUpdateAgent({ agent });
 
   const { handleAddTool, handleRemoveTool } = useToolsMutation({
@@ -165,12 +174,30 @@ export const AgentTools: React.FC = () => {
 
   const defaultToolIdSet = useMemo(() => new Set<string>(defaultAgentToolIds), []);
 
+  const inheritedToolIdSet = useMemo(
+    () => getInheritedToolIdSet(allTools, typeBase?.tools ?? []),
+    [allTools, typeBase?.tools]
+  );
+
   const activeTools = useMemo(
     () =>
       agent
-        ? getActiveTools(allTools, agentToolSelections, enableElasticCapabilities, defaultToolIdSet)
+        ? getActiveTools(
+            allTools,
+            agentToolSelections,
+            enableElasticCapabilities,
+            defaultToolIdSet,
+            inheritedToolIdSet
+          )
         : [],
-    [allTools, agentToolSelections, agent, enableElasticCapabilities, defaultToolIdSet]
+    [
+      allTools,
+      agentToolSelections,
+      agent,
+      enableElasticCapabilities,
+      defaultToolIdSet,
+      inheritedToolIdSet,
+    ]
   );
 
   const activeToolIdSet = useMemo(() => new Set(activeTools.map((t) => t.id)), [activeTools]);
@@ -179,6 +206,12 @@ export const AgentTools: React.FC = () => {
     if (enableElasticCapabilities) return new Set([...activeToolIdSet, ...defaultToolIdSet]);
     return activeToolIdSet;
   }, [activeToolIdSet, enableElasticCapabilities, defaultToolIdSet]);
+
+  const isToolLocked = useCallback(
+    (toolId: string) =>
+      inheritedToolIdSet.has(toolId) || (enableElasticCapabilities && defaultToolIdSet.has(toolId)),
+    [inheritedToolIdSet, enableElasticCapabilities, defaultToolIdSet]
+  );
 
   useEffect(() => {
     if (agentLoading || toolsLoading) return;
@@ -205,14 +238,14 @@ export const AgentTools: React.FC = () => {
 
   const handleToggleTool = useCallback(
     (tool: ToolDefinition, isActive: boolean) => {
-      if (enableElasticCapabilities && defaultToolIdSet.has(tool.id)) return;
+      if (isToolLocked(tool.id)) return;
       if (isActive) {
         handleAddTool(tool);
       } else {
         handleRemoveTool(tool);
       }
     },
-    [handleAddTool, handleRemoveTool, enableElasticCapabilities, defaultToolIdSet]
+    [handleAddTool, handleRemoveTool, isToolLocked]
   );
 
   const handleSelectTool = useCallback(
@@ -232,10 +265,10 @@ export const AgentTools: React.FC = () => {
     [handleRemoveTool, selectedToolId, setSelectedToolId]
   );
 
-  /** Guarded removal: only prevents removing auto-included tools from the agent. */
+  /** Guarded removal: only prevents removing auto-included or type-inherited tools. */
   const handleRemoveSelectedTool = () => {
     if (!selectedToolId) return;
-    if (enableElasticCapabilities && defaultToolIdSet.has(selectedToolId)) return;
+    if (isToolLocked(selectedToolId)) return;
     const tool = activeTools.find((t) => t.id === selectedToolId);
     if (tool) {
       handleRemoveToolWithDeselect(tool);
@@ -264,6 +297,7 @@ export const AgentTools: React.FC = () => {
           onToggleTool={handleToggleTool}
           enableElasticCapabilities={enableElasticCapabilities}
           builtinToolIdSet={defaultToolIdSet}
+          inheritedToolIdSet={inheritedToolIdSet}
         />
       ) : null}
       {isCreateToolOpen ? (
@@ -380,6 +414,7 @@ export const AgentTools: React.FC = () => {
                   selectedToolId={selectedToolId}
                   enableElasticCapabilities={enableElasticCapabilities}
                   defaultToolIdSet={defaultToolIdSet}
+                  inheritedToolIdSet={inheritedToolIdSet}
                   isRemoving={false}
                   onSelect={handleSelectTool}
                   onRemove={handleRemoveToolWithDeselect}
@@ -393,7 +428,7 @@ export const AgentTools: React.FC = () => {
                 <ToolDetailPanel
                   toolId={selectedToolId}
                   onRemove={handleRemoveSelectedTool}
-                  isAutoIncluded={enableElasticCapabilities && defaultToolIdSet.has(selectedToolId)}
+                  isAutoIncluded={isToolLocked(selectedToolId)}
                   canEditAgent={canEditAgent}
                 />
               ) : (

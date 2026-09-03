@@ -5,12 +5,15 @@
  * 2.0.
  */
 
-import type { CoreSetup } from '@kbn/core/server';
+import type { CoreSetup, Logger } from '@kbn/core/server';
 import type { AgentBuilderPluginSetup } from '@kbn/agent-builder-server';
 import { apiPrivileges } from '@kbn/context-engine-plugin/common/features';
 import type { WorkflowsServerPluginSetup } from '@kbn/workflows-management-plugin/server';
+import { registerContextEngineAgentType } from './agent_builder/agent/context_engine_agent_type';
+import { registerContextEngineSkills } from './agent_builder/skills';
 import { registerAgentBuilderTools } from './agent_builder/tools';
 import { registerAttachmentTypes } from './attachment_types';
+import { registerEnsureAgentRoute } from './routes/ensure_agent';
 import type {
   ContextEngineAgentBuilderPluginStart,
   ContextEngineAgentBuilderStartDependencies,
@@ -20,6 +23,7 @@ type WorkflowsManagementApi = WorkflowsServerPluginSetup['management'];
 
 export const registerContextEngineAgentBuilderIntegration = ({
   coreSetup,
+  logger,
   agentBuilder,
   workflowsManagement,
 }: {
@@ -27,10 +31,26 @@ export const registerContextEngineAgentBuilderIntegration = ({
     ContextEngineAgentBuilderStartDependencies,
     ContextEngineAgentBuilderPluginStart
   >;
+  logger: Logger;
   agentBuilder: AgentBuilderPluginSetup;
   workflowsManagement: WorkflowsManagementApi;
 }): void => {
   registerAttachmentTypes(agentBuilder);
+  registerContextEngineAgentType(agentBuilder);
+  registerContextEngineSkills(agentBuilder);
+
+  registerEnsureAgentRoute({
+    router: coreSetup.http.createRouter(),
+    logger,
+    getAgentBuilder: async () => {
+      const [, startDeps] = await coreSetup.getStartServices();
+      return startDeps.agentBuilder;
+    },
+    getSpaces: async () => {
+      const [, startDeps] = await coreSetup.getStartServices();
+      return startDeps.spaces;
+    },
+  });
 
   agentBuilder.agents.registerAiIndexResolver(async ({ ids, request }) => {
     const [, startDeps] = await coreSetup.getStartServices();
@@ -73,6 +93,10 @@ export const registerContextEngineAgentBuilderIntegration = ({
     getAiIndexService: async () => {
       const [, startDeps] = await coreSetup.getStartServices();
       return startDeps.contextEngine.getAiIndexService();
+    },
+    getFindingsService: async (esClient) => {
+      const [, startDeps] = await coreSetup.getStartServices();
+      return startDeps.contextEngine.getFindingsService(esClient);
     },
   });
 };

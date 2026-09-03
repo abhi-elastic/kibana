@@ -9,18 +9,20 @@ import type { CoreSetup, Logger } from '@kbn/core/server';
 import { ExecutionError } from '@kbn/workflows/server';
 import { createServerStepDefinition } from '@kbn/workflows-extensions/server';
 import { CONTEXT_ENGINE_ENABLED_SETTING_ID } from '@kbn/management-settings-ids';
-import { VerifyKiStepCommonDefinition } from '../../common/step_types/verify_ki_step';
+import {
+  VERIFY_KI_STEP_TYPE_ID,
+  VerifyKiStepCommonDefinition,
+} from '../../common/step_types/verify_ki_step';
 import { createKiVerifierRegistry, KiVerificationService } from '../ki_verification';
 import type { ContextEngineAnalyticsService } from '../telemetry';
-import { withKiVerificationTelemetry } from './helpers';
+import { normalizeKiStepInput, withKiVerificationTelemetry } from './helpers';
 
 export const createVerifyKiStepDefinition = (
   coreSetup: CoreSetup,
   logger: Logger,
-  analyticsService: ContextEngineAnalyticsService
+  analyticsService: ContextEngineAnalyticsService,
+  service: KiVerificationService = new KiVerificationService(createKiVerifierRegistry())
 ) => {
-  const service = new KiVerificationService(createKiVerifierRegistry());
-
   return createServerStepDefinition({
     ...VerifyKiStepCommonDefinition,
     handler: async (context) => {
@@ -36,15 +38,21 @@ export const createVerifyKiStepDefinition = (
         });
       }
 
+      const { ki, execute_esql: executeEsql } = normalizeKiStepInput(context.input, {
+        stepTypeId: VERIFY_KI_STEP_TYPE_ID,
+        booleanFields: ['execute_esql'],
+      });
+
       const summary = await withKiVerificationTelemetry({
         analyticsService,
         logger,
         run: () =>
-          service.verifyKi(context.input.ki, {
+          service.verifyKi(ki, {
             isEnabled,
             esClient: context.contextManager.getScopedEsClient(),
             logger,
             abortSignal: context.abortSignal,
+            executeEsql: executeEsql === true,
           }),
       });
 

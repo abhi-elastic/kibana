@@ -83,6 +83,20 @@ export const validateAbsoluteSignalWindow = (value: string): string | undefined 
       })
     : undefined;
 
+const TIME_BOUNDARY_DATE_MATH_PATTERN = /^now([-+][1-9][0-9]*[smhdwMy])?(\/[smhdwMy])?$/;
+
+/**
+ * Returns a translated error message when an investigation time boundary is neither
+ * `now`-relative date math (`now`, `now-7d`, `now/d`) nor an ISO 8601 date.
+ */
+export const validateInvestigationTimeBoundary = (value: string): string | undefined =>
+  TIME_BOUNDARY_DATE_MATH_PATTERN.test(value) || !Number.isNaN(Date.parse(value))
+    ? undefined
+    : i18n.translate('xpack.contextEngine.investigationScope.error.invalidTimeBoundary', {
+        defaultMessage:
+          'Must be date math relative to now (for example now-7d) or an ISO 8601 date.',
+      });
+
 /**
  * A relative signal window shorter than the schedule interval leaves signals
  * that arrive between runs permanently unanalyzed. Overlap is harmless — the

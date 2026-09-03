@@ -45,7 +45,13 @@ interface SkillsTabProps {
   isLoading: boolean;
   isFormDisabled: boolean;
   areElasticCapabilitiesEnabled: boolean;
+  /** Skills the agent's type contributes: shown active and locked. */
+  inheritedSkillIdSet?: ReadonlySet<string>;
+  /** Name of the agent type, for the inherited tooltip. */
+  inheritedTypeName?: string;
 }
+
+const EMPTY_SKILL_ID_SET: ReadonlySet<string> = new Set<string>();
 
 export const SkillsTab: React.FC<SkillsTabProps> = ({
   control,
@@ -53,6 +59,8 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
   isLoading,
   isFormDisabled,
   areElasticCapabilitiesEnabled,
+  inheritedSkillIdSet = EMPTY_SKILL_ID_SET,
+  inheritedTypeName,
 }) => {
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const showActiveOnlyChangeHandler = !isFormDisabled ? setShowActiveOnly : undefined;
@@ -73,6 +81,8 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
             showActiveOnly={showActiveOnly || isFormDisabled}
             onShowActiveOnlyChange={showActiveOnlyChangeHandler}
             areElasticCapabilitiesEnabled={areElasticCapabilitiesEnabled}
+            inheritedSkillIdSet={inheritedSkillIdSet}
+            inheritedTypeName={inheritedTypeName}
           />
         )}
       />
@@ -89,6 +99,8 @@ interface SkillsSelectionProps {
   showActiveOnly: boolean;
   onShowActiveOnlyChange?: (showActiveOnly: boolean) => void;
   areElasticCapabilitiesEnabled: boolean;
+  inheritedSkillIdSet: ReadonlySet<string>;
+  inheritedTypeName?: string;
 }
 
 const SkillsSelection: React.FC<SkillsSelectionProps> = ({
@@ -100,6 +112,8 @@ const SkillsSelection: React.FC<SkillsSelectionProps> = ({
   showActiveOnly,
   onShowActiveOnlyChange,
   areElasticCapabilitiesEnabled,
+  inheritedSkillIdSet,
+  inheritedTypeName,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageIndex, setPageIndex] = useState(0);
@@ -107,9 +121,15 @@ const SkillsSelection: React.FC<SkillsSelectionProps> = ({
 
   const selectedIdSet = useMemo(() => new Set(selectedSkills ?? []), [selectedSkills]);
 
+  const isSkillInherited = useCallback(
+    (skill: PublicSkillSummary) => inheritedSkillIdSet.has(skill.id),
+    [inheritedSkillIdSet]
+  );
+
   const isSkillAutoIncluded = useCallback(
-    (skill: PublicSkillSummary) => getIsSkillAutoIncluded(skill, areElasticCapabilitiesEnabled),
-    [areElasticCapabilitiesEnabled]
+    (skill: PublicSkillSummary) =>
+      isSkillInherited(skill) || getIsSkillAutoIncluded(skill, areElasticCapabilitiesEnabled),
+    [areElasticCapabilitiesEnabled, isSkillInherited]
   );
 
   const isSkillActive = useCallback(
@@ -175,7 +195,14 @@ const SkillsSelection: React.FC<SkillsSelectionProps> = ({
   }
 
   const columns = [
-    createCheckboxColumn(isSkillActive, isSkillAutoIncluded, handleToggleSkill, disabled),
+    createCheckboxColumn(
+      isSkillActive,
+      isSkillAutoIncluded,
+      isSkillInherited,
+      inheritedTypeName,
+      handleToggleSkill,
+      disabled
+    ),
     createSkillDetailsColumn(),
     createTypeColumn(),
   ];
@@ -355,20 +382,31 @@ const SkillDetailsColumn: React.FC<{ skill: PublicSkillSummary }> = ({ skill }) 
 const createCheckboxColumn = (
   isSkillActive: (skill: PublicSkillSummary) => boolean,
   isSkillAutoIncluded: (skill: PublicSkillSummary) => boolean,
+  isSkillInherited: (skill: PublicSkillSummary) => boolean,
+  inheritedTypeName: string | undefined,
   onToggle: (skillId: string) => void,
   disabled: boolean
 ) => ({
   width: '40px',
   render: (skill: PublicSkillSummary) => {
     const autoIncluded = isSkillAutoIncluded(skill);
+    const inherited = isSkillInherited(skill);
     const checkbox = (
       <EuiCheckbox
         id={`skill-${skill.id}`}
         checked={isSkillActive(skill)}
         onChange={() => onToggle(skill.id)}
         disabled={disabled || autoIncluded}
+        data-test-subj={inherited ? `agentBuilderInheritedSkill-${skill.id}` : undefined}
       />
     );
+    if (inherited) {
+      return (
+        <EuiToolTip content={labels.agentSkills.inheritedFromTypeTooltip(inheritedTypeName ?? '')}>
+          {checkbox}
+        </EuiToolTip>
+      );
+    }
     return autoIncluded ? (
       <EuiToolTip content={labels.agentSkills.elasticCapabilitiesManagedTooltip}>
         {checkbox}

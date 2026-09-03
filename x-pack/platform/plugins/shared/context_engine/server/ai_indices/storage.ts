@@ -12,6 +12,7 @@ import type {
   AiIndexAutomation,
   AiIndexDest,
   AiIndexFeedbackAnalysis,
+  AiIndexInvestigationScope,
   AiIndexSource,
 } from '../../common/http_api/ai_indices';
 
@@ -51,6 +52,22 @@ const storageSettings = {
           allowed_actions: types.keyword({}),
         },
       }),
+      investigation_scope: types.object({
+        properties: {
+          mode: types.keyword({}),
+          trace: types.object({
+            properties: {
+              agent_id: types.keyword({}),
+              // Date math or ISO dates, so keyword rather than date.
+              time_range: types.object({
+                properties: { from: types.keyword({}), to: types.keyword({}) },
+              }),
+              // Read back and handed to the investigation, never queried.
+              esql: types.keyword({ index: false, doc_values: false }),
+            },
+          }),
+        },
+      }),
     },
   },
 } satisfies IndexStorageSettings;
@@ -58,6 +75,7 @@ const storageSettings = {
 export interface AiIndexDocument {
   description?: string;
   feedback_analysis?: AiIndexFeedbackAnalysis;
+  investigation_scope?: AiIndexInvestigationScope;
   // Optional for backward compatibility with entries written before managed
   // indices existed; absence is treated as unmanaged (`false`) on read.
   managed?: boolean;

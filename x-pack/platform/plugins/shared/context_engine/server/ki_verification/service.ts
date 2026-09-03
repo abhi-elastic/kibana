@@ -37,7 +37,7 @@ export class KiVerificationService {
     for (const verifier of this.registry.getAll()) {
       let applies: boolean;
       try {
-        applies = verifier.applies(ki);
+        applies = verifier.applies(ki, verifierContext);
       } catch (error) {
         if (isAbortError(error)) {
           throw error;

@@ -1,0 +1,148 @@
+# Glossary: what each term means to the user
+
+The user reading the chat has not seen these skills or their reference files. Every term below is
+jargon to them. Rules:
+
+- The first time a message uses a term from this file, follow it with the meaning from here in
+  parentheses, in one clause. Keep the term itself: the user matches it against the attachment
+  card and the Overview page.
+- A table whose rows are checks, properties, finding kinds, labels, types or shapes gets a
+  `meaning` column with the text from here.
+- Define a term once per message. Define it again in a later message when the stage has changed
+  or the user asks.
+- Numbers first, then the meaning, then the interpretation. The meaning never replaces the count.
+
+## Trace checks (patterns looked for in the production agent's own traces)
+
+- T1 `tool_error`: the same tool failed the same way in several requests.
+- T2 `partial_tool_error`: a tool reported success but its result contained an error.
+- T3 `loop` (heavy request): a request made far more tool calls than this agent usually needs.
+- T4 `loop` / `discovery_loop`: one tool was called over and over inside a single request.
+- T5 `empty_retrieval`: a query returned no rows and the agent answered anyway.
+- T6 `soft_failure`: the agent's final answer admits it could not finish the task.
+- T7 `timeout_or_latency`: one step took more than half of the whole request.
+- T8 `token_runaway`: the amount of text sent to the model grew far beyond normal in one request.
+- T9 `system_error`: the request failed in the platform itself, not in a tool.
+- T10 `unsupported_operation`: a tool error matches a known limitation of ES|QL or of the tool.
+- T11 comparison: heavy requests are compared with similar requests that went well, to see where
+  they diverged.
+- T12 recurring task shapes: the kinds of question users keep asking this agent.
+- T13 most touched indices: the indices the agent reads most often.
+
+## Loop classifications (what a heavy request turned out to be)
+
+- `discovery_loop`: the agent kept probing the same index or field with different filters because
+  it did not know where the answer was.
+- `recovery_loop`: the agent kept retrying after the same error.
+- `multi_step_task`: the task needed many steps for every request; nothing to fix with a KI.
+- `multi_turn_followup`: one conversation with several small requests; not a problem.
+- `unclear`: the trace did not capture enough content to tell.
+
+## Measured properties (what was measured on the data the agent reads)
+
+- `spread`: how many indices a question has to visit, and whether a shared key links them.
+- `fan_out`: how many documents belong to one entity (one case, one customer) and must be read
+  together to answer about it.
+- `reading_cost`: how long the free text fields are that an agent has to read on the way to an
+  answer.
+- `discovery_risk`: how easy it is to pick the wrong index or field, because names overlap or look
+  alike or lack descriptions.
+- `query_risk`: how likely a reasonable looking query is to fail or return nothing, because of
+  field type conflicts, multi-valued fields, nested objects or truncated values.
+- `freshness`: how recent the data is and whether documents change after they are created.
+
+## Finding kinds
+
+Observed (seen in traces): the trace check names above are also the finding kinds.
+
+Hypothesized (measured on the data):
+
+- `spread_without_join_key`: the answer spans several indices and there is no field to join them.
+- `consolidation_cost`: one entity has so many documents that answering about it means reading and
+  merging a lot.
+- `reading_cost`: the text an agent must read for this question is long.
+- `discovery_risk`: several indices or fields could plausibly hold the answer.
+- `query_risk`: the fields on the way to the answer are hard to query correctly.
+- `probe_unanswerable`: the data cannot answer this question at all.
+
+Never findings, always recorded:
+
+- `task_shape` measurement: a recurring kind of question, from T12.
+- `touched_index` measurement: an index the agent reads often, from T13.
+
+## Labels on a finding
+
+- Confidence `confirmed`: an explicit error, or the identical pattern in two or more requests.
+- Confidence `strong`: a repeated pattern plus a comparison that shows what the better requests did
+  differently.
+- Confidence `suggestive`: a timing, token or count anomaly with no explicit failure.
+- Confidence `insufficient`: too few requests in the sample to judge; reported, never planned.
+- Impact `high` / `medium` / `low`: the user got a wrong or missing answer / the answer arrived but
+  cost extra steps, time or tokens / cosmetic.
+- KI usefulness `likely` / `possible` / `unlikely`: whether a stored fact would have changed the
+  outcome; `unlikely` when the pattern is rare, model bound, or the fix is a query the agent could
+  not use.
+- Prevalence: how many of the sampled requests showed the pattern, and in how many conversations.
+- Scale: how many indices, entities or probes the measured property affects, out of the total.
+- `observed` / `hypothesized`: seen in traces / predicted from measuring the data.
+- Sample band `insufficient` (under 10 requests) / `limited` (10 to 29) / `full` (30 or more).
+- Suppressed: the user dismissed this pattern in an earlier run, so it is not asked again.
+- Rare in this range: fired, but in too few requests to pass the gate.
+
+## Scope and access
+
+- Probe: a question the production agent is expected to answer, used to measure the data.
+- Answer path: the indices, joins and steps a generic agent would need to answer one probe.
+- Access mode `queries`: the production agent runs its own queries, so KIs may contain index names,
+  field names and ready to run queries.
+- Access mode `text_only`: the production agent only reads text it is given, so KIs must state the
+  facts themselves.
+- Unit of context: the thing one KI is about (one case, one customer, one index, one dashboard).
+- Corpus filter: the condition that limits which units get a KI (a time window, a status, a cap).
+
+## Decisions
+
+- `Dismiss`: not a problem, or not worth a KI; remembered so it is not asked again.
+- `Known issue`: real, already understood, no KI; noted in the closing message.
+- `Create and verify KI`: author a KI for this finding and check it before writing.
+- `Create KI and signal`: the same, and also copy the KI to the shared signals index that collects
+  recurring failure patterns across all AI indexes.
+
+## Strategy
+
+- Shape `systemic`: one KI per unit, produced by a workflow that loops over the units.
+- Shape `targeted_only`: only individual KIs written from the accepted findings.
+- Shape `both`: a systemic family plus targeted KIs.
+- Shape `none`: no KIs; the evidence did not support any.
+- Family: a group of KIs that share a unit of context and a shape, one KI per unit.
+- `unit_key`: the field whose distinct values are the units (or "index" when the unit is an index).
+- Extraction `llm`: a model writes each KI by summarising the unit's documents.
+- Extraction `mechanical`: fields are copied from the documents, no model involved.
+- Freshness `static`: units do not change once created, so KIs are written once.
+- Freshness `cursor`: units change, so the workflow tracks what it last processed and refreshes.
+- Readiness `routing_only`: the KI tells an agent where to look.
+- Readiness `query_ready`: the KI also carries a query that can be run as is.
+- `serves`: which probes or task shapes this family helps with.
+
+## KI types (individual KIs written from findings)
+
+- `constraint`: what cannot be done and where the limit is.
+- `workaround`: the constraint plus the alternative that works.
+- `disambiguation`: which of several similar indices or fields answers which question.
+- `task_recipe`: the sequence of steps that worked for a recurring kind of question.
+- `fact`: a self contained answer, for agents that only read text.
+- Family KI: one KI per unit of an approved family, produced by a workflow.
+
+## Generation
+
+- Plan item: one workflow to build, identified by `plan_item_id`; every KI it writes carries it.
+- Pilot: a run limited to 1 to 3 units to check the output before the full run.
+- Expand: the full run over every unit that passes the corpus filter.
+- Dispatch workflow: a wrapper that splits a large unit list into batches.
+- Provenance: the plan, finding, source query or trace ids recorded on each KI so it can be traced
+  back to why it exists.
+- Verifier `schema-shape`: required fields present and within bounds.
+- Verifier `provenance-present`: the plan id and a source reference are on the KI.
+- Verifier `esql-valid-syntax`: any query in the KI parses.
+- Verifier `index-exists`: the index the KI refers to exists.
+- Verifier `esql-executes`: any query in the KI runs against the cluster.

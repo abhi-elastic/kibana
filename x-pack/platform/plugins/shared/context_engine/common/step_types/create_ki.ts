@@ -21,6 +21,12 @@ export const createKiInputSchema = z.object({
       'Optional document id for the knowledge indicator (index-backed AI indices only); a KI with the same id is replaced. When omitted, the id is generated.'
     ),
   ki: kiFieldsSchema.describe('The knowledge indicator document to create'),
+  verify: z
+    .boolean()
+    .optional()
+    .describe(
+      'Run the Context Engine KI verifiers before writing and fail the step (KiVerificationError) when any applicable verifier fails. Use when the workflow has no separate verifyKi gate.'
+    ),
 });
 
 export const createKiOutputSchema = z.object({
@@ -48,7 +54,8 @@ export const createKiStepCommonDefinition: CommonStepDefinition<
         'Indexes a knowledge indicator document into the backing store of the specified AI index. ' +
         'When the AI index does not exist yet, it is created automatically with an index backing ' +
         'store derived from its id. Pass ki_id to set a stable document id (index-backed only); ' +
-        're-runs with the same id replace the KI. The step returns the document id of the ' +
+        're-runs with the same id replace the KI. With verify: true the KI verifiers run first ' +
+        'and a failing KI is not written. The step returns the document id of the ' +
         'created KI, which can be used by later steps to update or delete it.',
     }),
     examples: [

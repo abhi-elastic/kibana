@@ -19,6 +19,7 @@ import type {
   AiIndexDest,
   AiIndexFeedbackAnalysis,
   AiIndexHttpItem,
+  AiIndexInvestigationScope,
   AiIndexProperties,
 } from '../../common/http_api/ai_indices';
 import {
@@ -37,6 +38,9 @@ const toAiIndexItem = (id: string, document: AiIndexDocument): AiIndexHttpItem =
   ...(document.description !== undefined && { description: document.description }),
   ...(document.feedback_analysis !== undefined && {
     feedback_analysis: document.feedback_analysis,
+  }),
+  ...(document.investigation_scope !== undefined && {
+    investigation_scope: document.investigation_scope,
   }),
   managed: document.managed ?? false,
   dest: document.dest,
@@ -212,6 +216,30 @@ export class AiIndexService {
     );
 
     return feedbackAnalysis;
+  }
+
+  /**
+   * Replaces only the investigation scope block, leaving the rest of the entry
+   * untouched. Permitted on managed entries for the same reason as
+   * {@link setFeedbackAnalysis}: what to investigate is operator preference,
+   * not part of the index definition.
+   */
+  async setInvestigationScope(
+    aiIndexId: string,
+    investigationScope: AiIndexInvestigationScope
+  ): Promise<AiIndexInvestigationScope> {
+    const existing = await this.findDocument(aiIndexId);
+    if (!existing) {
+      throw new AiIndexNotFoundError(aiIndexId);
+    }
+
+    await this.writeDocument(
+      aiIndexId,
+      { ...existing.document, investigation_scope: investigationScope },
+      existing
+    );
+
+    return investigationScope;
   }
 
   async get(aiIndexId: string): Promise<AiIndexHttpItem> {

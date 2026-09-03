@@ -17,6 +17,7 @@ import {
   getActiveTools,
   getActiveSkills,
   getActivePlugins,
+  getInheritedToolIdSet,
   cleanInvalidToolReferences,
 } from './tool_selection_utils';
 import type { AgentEditState } from '../hooks/agents/use_agent_edit';
@@ -127,6 +128,50 @@ describe('tool_selection_utils', () => {
       // All tools already selected via wildcard, no defaults to append
       expect(result.map((t) => t.id)).toEqual(['tool1', 'tool2', 'tool3']);
     });
+
+    it('includes tools inherited from the agent type even with elastic capabilities disabled', () => {
+      const selections: ToolSelection[] = [{ tool_ids: ['tool2'] }];
+      const result = getActiveTools(
+        mockTools,
+        selections,
+        false,
+        defaultToolIds,
+        new Set(['tool3'])
+      );
+
+      expect(result.map((t) => t.id)).toEqual(['tool2', 'tool3']);
+    });
+
+    it('does not duplicate an inherited tool that is also explicitly selected', () => {
+      const selections: ToolSelection[] = [{ tool_ids: ['tool3'] }];
+      const result = getActiveTools(
+        mockTools,
+        selections,
+        false,
+        defaultToolIds,
+        new Set(['tool3'])
+      );
+
+      expect(result.map((t) => t.id)).toEqual(['tool3']);
+    });
+  });
+
+  describe('getInheritedToolIdSet', () => {
+    it('resolves the type selections against the known tools', () => {
+      expect([...getInheritedToolIdSet(mockTools, [{ tool_ids: ['tool1', 'missing'] }])]).toEqual([
+        'tool1',
+      ]);
+    });
+
+    it('expands the wildcard to every known tool', () => {
+      expect([
+        ...getInheritedToolIdSet(mockTools, [{ tool_ids: [allToolsSelectionWildcard] }]),
+      ]).toEqual(['tool1', 'tool2', 'tool3']);
+    });
+
+    it('is empty when the type contributes nothing', () => {
+      expect(getInheritedToolIdSet(mockTools, []).size).toBe(0);
+    });
   });
 
   describe('getActiveSkills', () => {
@@ -178,6 +223,12 @@ describe('tool_selection_utils', () => {
       const result = getActiveSkills(mockSkills, [], false);
 
       expect(result).toEqual([]);
+    });
+
+    it('includes skills inherited from the agent type, including excluded built-ins', () => {
+      const result = getActiveSkills(mockSkills, ['skill2'], false, new Set(['skill5', 'skill2']));
+
+      expect(result.map((s) => s.id)).toEqual(['skill2', 'skill5']);
     });
   });
 

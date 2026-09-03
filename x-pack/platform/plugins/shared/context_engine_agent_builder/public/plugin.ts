@@ -6,7 +6,10 @@
  */
 
 import type { CoreSetup, CoreStart, Plugin, PluginInitializerContext } from '@kbn/core/public';
+import { registerAttachmentUiDefinitions } from './attachment_types';
+import { createInvestigationProvider } from './create_investigation_provider';
 import { createSuggestAutomationProvider } from './create_suggest_automation_provider';
+import { ensureContextEngineAgentId } from './ensure_agent';
 import type {
   ContextEngineAgentBuilderPublicSetup,
   ContextEngineAgentBuilderPublicSetupDependencies,
@@ -38,11 +41,20 @@ export class ContextEngineAgentBuilderPlugin
     core: CoreStart,
     { contextEngine, agentBuilder }: ContextEngineAgentBuilderPublicStartDependencies
   ): ContextEngineAgentBuilderPublicStart {
+    registerAttachmentUiDefinitions(agentBuilder.attachments);
     contextEngine.registerAgentBuilderIntegration({
       suggestAutomation: createSuggestAutomationProvider({
         agentBuilder,
         application: core.application,
+        http: core.http,
       }),
+      investigation: createInvestigationProvider({
+        agentBuilder,
+        application: core.application,
+        http: core.http,
+        notifications: core.notifications,
+      }),
+      ensureAgentId: () => ensureContextEngineAgentId(core.http),
     });
 
     return {};

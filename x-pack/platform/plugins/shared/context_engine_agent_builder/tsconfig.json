@@ -12,6 +12,7 @@
     "@kbn/agent-builder-common",
     "@kbn/context-engine-plugin",
     "@kbn/i18n",
+    "@kbn/i18n-react",
     "@kbn/workflows-management-plugin",
     "@kbn/security-plugin",
     "@kbn/zod",
@@ -21,6 +22,7 @@
     "@kbn/core-http-server-mocks",
     "@kbn/workflows",
     "@kbn/workflows-yaml",
-    "@kbn/agent-builder-plugin"
+    "@kbn/agent-builder-plugin",
+    "@kbn/spaces-plugin"
   ]
 }

@@ -7,6 +7,7 @@
 
 import type { CoreSetup } from '@kbn/core/server';
 import type { KibanaRequest } from '@kbn/core-http-server';
+import { loggingSystemMock } from '@kbn/core/server/mocks';
 import type { AgentBuilderPluginSetup, AiIndexResolver } from '@kbn/agent-builder-server';
 import { registerContextEngineAgentBuilderIntegration } from './register_agent_builder_integration';
 import type {
@@ -19,6 +20,12 @@ jest.mock('./agent_builder/tools', () => ({
 }));
 jest.mock('./attachment_types', () => ({
   registerAttachmentTypes: jest.fn(),
+}));
+jest.mock('./routes/ensure_agent', () => ({
+  registerEnsureAgentRoute: jest.fn(),
+}));
+jest.mock('./agent_builder/skills', () => ({
+  registerContextEngineSkills: jest.fn(),
 }));
 
 const request = {} as KibanaRequest;
@@ -45,6 +52,7 @@ describe('registerContextEngineAgentBuilderIntegration', () => {
 
     const list = jest.fn().mockResolvedValue(aiIndices);
     const coreSetup = {
+      http: { createRouter: jest.fn() },
       getStartServices: jest.fn().mockResolvedValue([
         {},
         {
@@ -61,6 +69,7 @@ describe('registerContextEngineAgentBuilderIntegration', () => {
     let resolver: AiIndexResolver | undefined;
     const agentBuilder = {
       agents: {
+        registerType: jest.fn(),
         registerAiIndexResolver: jest.fn((registered: AiIndexResolver) => {
           resolver = registered;
         }),
@@ -69,6 +78,7 @@ describe('registerContextEngineAgentBuilderIntegration', () => {
 
     registerContextEngineAgentBuilderIntegration({
       coreSetup,
+      logger: loggingSystemMock.createLogger(),
       agentBuilder,
       workflowsManagement: {} as any,
     });

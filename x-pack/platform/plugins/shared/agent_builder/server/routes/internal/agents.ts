@@ -14,6 +14,7 @@ import { getHandlerWrapper } from '../wrap_handler';
 import type {
   AgentAiIndicesWarning,
   GetAgentAiIndicesResponse,
+  GetAgentTypeBaseResponse,
   ListAgentAiIndicesResponse,
 } from '../../../common/http_api/agents';
 import { internalApiPath } from '../../../common/constants';
@@ -160,6 +161,42 @@ export function registerInternalAgentRoutes({
             assigned: agent.configuration.ai_indices ?? [],
           }),
           ...(warnings.length > 0 ? { warnings } : {}),
+        },
+      });
+    })
+  );
+
+  // Tools and skills an agent inherits from its type.
+  //
+  // The agent form reads the agent's own configuration, which is empty for agents that get
+  // everything from their type; this lets it show those entries as active and locked.
+  router.get(
+    {
+      path: `${internalApiPath}/agents/{id}/_type_base`,
+      validate: {
+        params: schema.object({
+          id: schema.string({ maxLength: agentIdMaxLength }),
+        }),
+      },
+      options: { access: 'internal' },
+      security: AGENT_BUILDER_READ_SECURITY,
+    },
+    wrapHandler(async (ctx, request, response) => {
+      const { agents: agentsService } = getInternalServices();
+      const registry = await agentsService.getRegistry({ request });
+      const agent = await registry.get(request.params.id);
+      const base = await agentsService.resolveAgentBaseConfiguration({
+        agentType: agent.type,
+        request,
+      });
+      const typeName = agentsService.getAgentType(agent.type)?.name;
+
+      return response.ok<GetAgentTypeBaseResponse>({
+        body: {
+          agent_type: agent.type,
+          ...(typeName ? { agent_type_name: typeName } : {}),
+          tools: base?.tools ?? [],
+          skill_ids: base?.skill_ids ?? [],
         },
       });
     })

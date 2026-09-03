@@ -7,15 +7,20 @@
 
 import { createServerStepDefinition } from '@kbn/workflows-extensions/server';
 import { ExecutionError } from '@kbn/workflows/server';
-import { createKiStepCommonDefinition } from '../../common/step_types/create_ki';
+import { CREATE_KI_STEP_ID, createKiStepCommonDefinition } from '../../common/step_types/create_ki';
+import type { KiVerificationService } from '../ki_verification';
 import type { KiStepDependencies } from './helpers';
 import {
   assertContextEngineEnabled,
   assertKiWritePrivilege,
   assertWritableDest,
+  normalizeKiStepInput,
   resolveOrCreateAiIndex,
+  withKiVerificationTelemetry,
   withKiWriteTelemetry,
 } from './helpers';
+
+export const KI_VERIFICATION_ERROR_TYPE = 'KiVerificationError';
 
 export const getCreateKiStepDefinition = ({
   getAiIndexService,
@@ -23,14 +28,23 @@ export const getCreateKiStepDefinition = ({
   checkWritePrivilege,
   analyticsService,
   logger,
-}: KiStepDependencies) =>
+  verificationService,
+}: KiStepDependencies & { verificationService: KiVerificationService }) =>
   createServerStepDefinition({
     ...createKiStepCommonDefinition,
     handler: async (context) => {
       const request = context.contextManager.getFakeRequest();
       await assertContextEngineEnabled(isContextEngineEnabled, request);
 
-      const { ai_index_id: aiIndexId, ki_id: kiId, ki } = context.input;
+      const {
+        ai_index_id: aiIndexId,
+        ki_id: kiId,
+        ki,
+        verify,
+      } = normalizeKiStepInput(context.input, {
+        stepTypeId: CREATE_KI_STEP_ID,
+        booleanFields: ['verify'],
+      });
       return withKiWriteTelemetry({
         action: 'create',
         aiIndexId,
@@ -50,6 +64,31 @@ export const getCreateKiStepDefinition = ({
             });
           }
           const esClient = context.contextManager.getScopedEsClient();
+
+          if (verify === true) {
+            // The setting was asserted above, so the registry runs unconditionally here.
+            const summary = await withKiVerificationTelemetry({
+              analyticsService,
+              logger,
+              run: () =>
+                verificationService.verifyKi(ki, {
+                  isEnabled: true,
+                  esClient,
+                  logger,
+                  abortSignal: context.abortSignal,
+                }),
+            });
+            if (!summary.passed) {
+              const failures = summary.results.filter((result) => !result.passed);
+              throw new ExecutionError({
+                type: KI_VERIFICATION_ERROR_TYPE,
+                message: `KI '${ki.title}' failed verification: ${failures
+                  .map((result) => `${result.verifier}: ${result.reason ?? 'failed'}`)
+                  .join('; ')}`,
+                details: { aiIndexId, kiId, results: summary.results },
+              });
+            }
+          }
 
           const response = await esClient.index(
             {

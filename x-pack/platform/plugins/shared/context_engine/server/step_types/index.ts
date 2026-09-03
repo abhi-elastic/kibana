@@ -6,22 +6,23 @@
  */
 
 import type { WorkflowsExtensionsServerPluginSetup } from '@kbn/workflows-extensions/server';
+import type { KiVerificationService } from '../ki_verification';
 import type { KiStepDependencies } from './helpers';
 import { getCreateKiStepDefinition } from './create_ki';
 import { getUpdateKiStepDefinition } from './update_ki';
 import { getDeleteKiStepDefinition } from './delete_ki';
 
-/**
- * Registers the KI workflow steps. Registration is global; the space-scoped
- * Context Engine setting is enforced per request in each handler.
- */
 export const registerStepDefinitions = ({
   workflowsExtensions,
+  verificationService,
   ...deps
 }: KiStepDependencies & {
   workflowsExtensions: WorkflowsExtensionsServerPluginSetup;
+  verificationService: KiVerificationService;
 }): void => {
-  workflowsExtensions.registerStepDefinition(getCreateKiStepDefinition(deps));
+  workflowsExtensions.registerStepDefinition(
+    getCreateKiStepDefinition({ ...deps, verificationService })
+  );
   workflowsExtensions.registerStepDefinition(getUpdateKiStepDefinition(deps));
   workflowsExtensions.registerStepDefinition(getDeleteKiStepDefinition(deps));
 };

@@ -12,15 +12,18 @@ import {
   AI_INDEX_INTERNAL_API_VERSION,
   aiIndexByIdPath,
   aiIndexFeedbackAnalysisPath,
+  aiIndexInvestigationScopePath,
   aiIndexPath,
 } from '../../../common/constants';
 import type {
   AiIndexFeedbackAnalysis,
+  AiIndexInvestigationScope,
   AiIndexProperties,
   CreateAiIndexResponse,
   GetAiIndexResponse,
   ListAiIndexResponse,
   PutAiIndexFeedbackAnalysisResponse,
+  PutAiIndexInvestigationScopeResponse,
   PutAiIndexResponse,
 } from '../../../common/http_api/ai_indices';
 
@@ -87,6 +90,24 @@ export const putAiIndex = (
     version: AI_INDEX_API_VERSION,
     body: JSON.stringify(properties),
   });
+
+interface PutAiIndexInvestigationScopeArgs {
+  aiIndexId: string;
+  investigationScope: AiIndexInvestigationScope;
+}
+
+/** Replaces only the guided investigation scope; also allowed on managed AI indices. */
+export const putAiIndexInvestigationScope = (
+  http: HttpStart,
+  { aiIndexId, investigationScope }: PutAiIndexInvestigationScopeArgs
+): Promise<PutAiIndexInvestigationScopeResponse> =>
+  http.put<PutAiIndexInvestigationScopeResponse>(
+    buildPath(aiIndexInvestigationScopePath, { aiIndexId }),
+    {
+      version: AI_INDEX_INTERNAL_API_VERSION,
+      body: JSON.stringify(investigationScope),
+    }
+  );
 
 interface PutAiIndexFeedbackAnalysisArgs {
   aiIndexId: string;

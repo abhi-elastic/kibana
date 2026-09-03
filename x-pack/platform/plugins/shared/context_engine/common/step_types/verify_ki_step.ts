@@ -15,6 +15,12 @@ export const VERIFY_KI_STEP_TYPE_ID = 'context-engine.verifyKi';
 
 export const VerifyKiInputSchema = z.object({
   ki: kiPartialFieldsSchema,
+  execute_esql: z
+    .boolean()
+    .optional()
+    .describe(
+      'Also run every query in attributes.esql with "| LIMIT 0" to catch unknown indices and fields (esql-executes verifier). Off by default: it costs one query per KI.'
+    ),
 });
 
 export const VerifyKiOutputSchema = z.object({
@@ -48,7 +54,7 @@ export const VerifyKiStepCommonDefinition: CommonStepDefinition<
   documentation: {
     details: i18n.translate('xpack.contextEngine.verifyKiStep.documentation.details', {
       defaultMessage:
-        'The {stepTypeId} step runs all applicable Context Engine verifiers against a knowledge indicator and returns a per-verifier pass/fail summary. If no verifier applies (for example, no ES|QL in `attributes.esql`), the step passes with empty results. Requires the Context Engine advanced setting.',
+        'The {stepTypeId} step runs all applicable Context Engine verifiers against a knowledge indicator and returns a per-verifier pass/fail summary: schema-shape (required fields, bounds, per-type attributes), provenance-present (plan and source ids on planned KIs), esql-valid-syntax, index-exists (`attributes.index` resolves) and, with `execute_esql: true`, esql-executes. Requires the Context Engine advanced setting.',
       values: { stepTypeId: VERIFY_KI_STEP_TYPE_ID },
     }),
     examples: [

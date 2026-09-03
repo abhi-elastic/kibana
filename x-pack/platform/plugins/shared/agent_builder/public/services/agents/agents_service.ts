@@ -18,6 +18,7 @@ import type {
   DeleteAgentResponse,
   GetAgentAccessControlResponse,
   GetAgentAiIndicesResponse,
+  GetAgentTypeBaseResponse,
   GetAgentResponse,
   ListAgentAiIndicesResponse,
   ListAgentResponse,
@@ -30,6 +31,7 @@ import { internalApiPath, publicApiPath } from '../../../common/constants';
 /** Static, so it does not read as a dynamic http path. */
 const AGENT_AI_INDICES_LIST_PATH = `${internalApiPath}/agents/_ai_indices`;
 const AGENT_AI_INDICES_BY_ID_PATH = `${internalApiPath}/agents/{id}/_ai_indices`;
+const AGENT_TYPE_BASE_BY_ID_PATH = `${internalApiPath}/agents/{id}/_type_base`;
 
 export class AgentService {
   private readonly http: HttpSetup;
@@ -66,6 +68,15 @@ export class AgentService {
   async getAgentAiIndices(id: string): Promise<GetAgentAiIndicesResponse> {
     return await this.http.get<GetAgentAiIndicesResponse>(
       buildPath(AGENT_AI_INDICES_BY_ID_PATH, { id })
+    );
+  }
+
+  /**
+   * Returns the tools and skills one agent inherits from its type.
+   */
+  async getAgentTypeBase(id: string): Promise<GetAgentTypeBaseResponse> {
+    return await this.http.get<GetAgentTypeBaseResponse>(
+      buildPath(AGENT_TYPE_BASE_BY_ID_PATH, { id })
     );
   }
 

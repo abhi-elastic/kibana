@@ -25,6 +25,8 @@ interface ToolsSelectionProps {
   showActiveOnly?: boolean;
   onShowActiveOnlyChange?: (showActiveOnly: boolean) => void;
   areElasticCapabilitiesEnabled?: boolean;
+  inheritedToolIdSet?: ReadonlySet<string>;
+  inheritedTypeName?: string;
 }
 
 export const ToolsSelection: React.FC<ToolsSelectionProps> = ({
@@ -36,6 +38,8 @@ export const ToolsSelection: React.FC<ToolsSelectionProps> = ({
   showActiveOnly = false,
   onShowActiveOnlyChange,
   areElasticCapabilitiesEnabled = false,
+  inheritedToolIdSet,
+  inheritedTypeName,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageIndex, setPageIndex] = useState(0);
@@ -44,8 +48,15 @@ export const ToolsSelection: React.FC<ToolsSelectionProps> = ({
   const defaultToolIdSet = useMemo(() => new Set<string>(defaultAgentToolIds), []);
 
   const activeTools = useMemo(
-    () => getActiveTools(tools, selectedTools, areElasticCapabilitiesEnabled, defaultToolIdSet),
-    [tools, selectedTools, areElasticCapabilitiesEnabled, defaultToolIdSet]
+    () =>
+      getActiveTools(
+        tools,
+        selectedTools,
+        areElasticCapabilitiesEnabled,
+        defaultToolIdSet,
+        inheritedToolIdSet
+      ),
+    [tools, selectedTools, areElasticCapabilitiesEnabled, defaultToolIdSet, inheritedToolIdSet]
   );
 
   const activeToolIdSet = useMemo(() => new Set(activeTools.map((t) => t.id)), [activeTools]);
@@ -84,10 +95,18 @@ export const ToolsSelection: React.FC<ToolsSelectionProps> = ({
   const handleToggleTool = useCallback(
     (toolId: string) => {
       if (areElasticCapabilitiesEnabled && defaultToolIdSet.has(toolId)) return;
+      if (inheritedToolIdSet?.has(toolId)) return;
       const newSelection = toggleToolSelection(toolId, tools, selectedTools);
       onToolsChange(newSelection);
     },
-    [selectedTools, onToolsChange, tools, areElasticCapabilitiesEnabled, defaultToolIdSet]
+    [
+      selectedTools,
+      onToolsChange,
+      tools,
+      areElasticCapabilitiesEnabled,
+      defaultToolIdSet,
+      inheritedToolIdSet,
+    ]
   );
 
   const handleSearchChange = useCallback((query: string) => {
@@ -141,6 +160,8 @@ export const ToolsSelection: React.FC<ToolsSelectionProps> = ({
         onPageSizeChange={handlePageSizeChange}
         areElasticCapabilitiesEnabled={areElasticCapabilitiesEnabled}
         defaultToolIdSet={defaultToolIdSet}
+        inheritedToolIdSet={inheritedToolIdSet}
+        inheritedTypeName={inheritedTypeName}
       />
     </div>
   );

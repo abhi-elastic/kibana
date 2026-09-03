@@ -7,12 +7,14 @@
 
 import { EuiProvider } from '@elastic/eui';
 import { coreMock } from '@kbn/core/public/mocks';
+import { dataPluginMock } from '@kbn/data-plugin/public/mocks';
 import { triggersActionsUiMock } from '@kbn/triggers-actions-ui-plugin/public/mocks';
 import { KibanaContextProvider } from '@kbn/kibana-react-plugin/public';
 import { I18nProvider } from '@kbn/i18n-react';
 import { QueryClient, QueryClientProvider } from '@kbn/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React, { useState } from 'react';
+import { sourcesValidatePath } from '../../../../common/constants';
 import { SourcePicker } from './source_picker';
 import type { SelectedSource } from './types';
 
@@ -50,7 +52,22 @@ const createServices = () => {
     if (path === '/api/actions/connectors') return Promise.resolve(CONNECTORS);
     return Promise.resolve(undefined);
   });
-  return { ...services, triggersActionsUi: triggersActionsUiMock.createStart() };
+  // ES|QL sources are validated server-side before they are added.
+  (services.http.post as jest.Mock).mockImplementation((path: string) => {
+    if (path === sourcesValidatePath) return Promise.resolve({ valid: true });
+    return Promise.resolve(undefined);
+  });
+  const getIndices = jest.fn().mockResolvedValue([
+    { name: 'logs-nginx', tags: [{ key: 'data_stream' }] },
+    { name: '.internal-hidden', tags: [{ key: 'index' }] },
+  ]);
+  const data = dataPluginMock.createStartContract();
+  const dataViews = { ...data.dataViews, getIndices };
+  return {
+    ...services,
+    data: { ...data, dataViews },
+    triggersActionsUi: triggersActionsUiMock.createStart(),
+  };
 };
 
 const Harness = ({ initialSources = [] }: { initialSources?: SelectedSource[] }) => {
@@ -88,35 +105,88 @@ describe('SourcePicker', () => {
     jest.clearAllMocks();
   });
 
-  it('adds a raw ES|QL query as a source from the ES|QL tab', () => {
-    renderWithProviders(<Harness />);
+  it('adds a raw ES|QL query as a source once the server validates it', async () => {
+    const { services } = renderWithProviders(<Harness />);
 
     // The add button is disabled until a non-empty query is entered.
     expect(screen.getByTestId('contextAddEsqlSourceButton')).toBeDisabled();
 
     addEsqlSource('FROM logs-* | LIMIT 10');
 
-    expect(screen.getByTestId('contextSelectedSource-esql-0')).toBeInTheDocument();
+    expect(await screen.findByTestId('contextSelectedSource-esql-0')).toBeInTheDocument();
+    expect(services.http.post).toHaveBeenCalledWith(
+      sourcesValidatePath,
+      expect.objectContaining({ body: JSON.stringify({ esql: 'FROM logs-* | LIMIT 10' }) })
+    );
   });
 
-  it('does not add a duplicate ES|QL query', () => {
+  it('does not add an ES|QL query the server rejects and shows the errors', async () => {
+    const services = createServices();
+    services.http.post.mockResolvedValue({
+      valid: false,
+      errors: [{ type: 'verification_exception', message: 'Unknown index [nope]' }],
+    });
+    renderWithProviders(<Harness />, services);
+
+    addEsqlSource('FROM nope');
+
+    expect(await screen.findByTestId('contextEsqlSourceInvalid')).toHaveTextContent(
+      'Unknown index [nope]'
+    );
+    expect(screen.queryByTestId('contextSelectedSource-esql-0')).not.toBeInTheDocument();
+    expect(screen.getByTestId('contextAddEsqlSourceButton')).toBeDisabled();
+  });
+
+  it('does not add a duplicate ES|QL query', async () => {
     renderWithProviders(<Harness />);
 
     addEsqlSource('FROM logs-* | LIMIT 10');
+    await screen.findByTestId('contextSelectedSource-esql-0');
     addEsqlSource('FROM logs-* | LIMIT 10');
 
-    expect(screen.getAllByTestId('contextSelectedSource-esql-0')).toHaveLength(1);
+    await waitFor(() =>
+      expect(screen.getAllByTestId('contextSelectedSource-esql-0')).toHaveLength(1)
+    );
+    expect(screen.queryByTestId('contextSelectedSource-esql-1')).not.toBeInTheDocument();
   });
 
-  it('removes a selected source when its remove button is clicked', () => {
+  it('removes a selected source when its remove button is clicked', async () => {
     renderWithProviders(<Harness />);
 
     addEsqlSource('FROM logs-* | LIMIT 10');
 
-    const row = screen.getByTestId('contextSelectedSource-esql-0');
+    const row = await screen.findByTestId('contextSelectedSource-esql-0');
     fireEvent.click(within(row).getByTestId('contextRemoveSourceButton'));
 
     expect(screen.queryByTestId('contextSelectedSource-esql-0')).not.toBeInTheDocument();
+  });
+
+  it('adds a FROM query when an index is picked from the guided picker', async () => {
+    const { services } = renderWithProviders(<Harness />);
+
+    fireEvent.change(within(screen.getByTestId('contextIndexPickerCombo')).getByRole('combobox'), {
+      target: { value: 'logs' },
+    });
+
+    expect(await screen.findByText('logs-nginx')).toBeInTheDocument();
+    expect(services.data.dataViews.getIndices).toHaveBeenCalledWith(
+      expect.objectContaining({ pattern: 'logs*' })
+    );
+    // Hidden / system indices are never offered.
+    expect(screen.queryByText('.internal-hidden')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('logs-nginx'));
+
+    const row = await screen.findByTestId('contextSelectedSource-esql-0');
+    expect(row).toHaveTextContent('FROM logs-nginx');
+    // Guided picks are plain FROM queries; they are not sent through the ES|QL validator.
+    expect(services.http.post).not.toHaveBeenCalled();
+  });
+
+  it('does not look up indices until the user types', () => {
+    const { services } = renderWithProviders(<Harness />);
+
+    expect(services.data.dataViews.getIndices).not.toHaveBeenCalled();
   });
 
   it('does not fetch connectors on mount when only the ES|QL tab is shown', () => {

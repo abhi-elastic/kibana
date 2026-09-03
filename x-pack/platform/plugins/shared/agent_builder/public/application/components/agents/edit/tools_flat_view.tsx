@@ -37,6 +37,10 @@ interface ToolsFlatViewProps {
   onPageSizeChange: (pageSize: number) => void;
   areElasticCapabilitiesEnabled?: boolean;
   defaultToolIdSet?: Set<string>;
+  /** Tools the agent's type contributes: shown active and locked. */
+  inheritedToolIdSet?: ReadonlySet<string>;
+  /** Name of the agent type, for the inherited tooltip. */
+  inheritedTypeName?: string;
 }
 
 interface ToolDetailsColumnProps {
@@ -67,7 +71,9 @@ const createCheckboxColumn = (
   onToggleTool: (toolId: string) => void,
   disabled: boolean,
   areElasticCapabilitiesEnabled: boolean,
-  defaultToolIdSet: Set<string>
+  defaultToolIdSet: Set<string>,
+  inheritedToolIdSet: ReadonlySet<string>,
+  inheritedTypeName: string | undefined
 ) => ({
   width: '40px',
   name: (
@@ -79,7 +85,9 @@ const createCheckboxColumn = (
     const toolFields: ToolSelectionRelevantFields = {
       id: tool.id,
     };
-    const isAutoIncluded = areElasticCapabilitiesEnabled && defaultToolIdSet.has(tool.id);
+    const isInherited = inheritedToolIdSet.has(tool.id);
+    const isAutoIncluded =
+      isInherited || (areElasticCapabilitiesEnabled && defaultToolIdSet.has(tool.id));
     const checkbox = (
       <EuiCheckbox
         id={`tool-${tool.id}`}
@@ -87,8 +95,16 @@ const createCheckboxColumn = (
         onChange={() => onToggleTool(tool.id)}
         disabled={disabled || isAutoIncluded}
         aria-label={labels.tools.selectToolCheckboxAriaLabel(tool.id)}
+        data-test-subj={isInherited ? `agentBuilderInheritedTool-${tool.id}` : undefined}
       />
     );
+    if (isInherited) {
+      return (
+        <EuiToolTip content={labels.agentTools.inheritedFromTypeTooltip(inheritedTypeName ?? '')}>
+          {checkbox}
+        </EuiToolTip>
+      );
+    }
     return isAutoIncluded ? (
       <EuiToolTip content={labels.agentTools.autoIncludedTooltip}>{checkbox}</EuiToolTip>
     ) : (
@@ -121,9 +137,12 @@ export const ToolsFlatView: React.FC<ToolsFlatViewProps> = ({
   onPageSizeChange,
   areElasticCapabilitiesEnabled = false,
   defaultToolIdSet,
+  inheritedToolIdSet,
+  inheritedTypeName,
 }) => {
   const emptyDefaultToolIdSet = React.useMemo(() => new Set<string>(), []);
   const resolvedDefaultToolIdSet = defaultToolIdSet ?? emptyDefaultToolIdSet;
+  const resolvedInheritedToolIdSet = inheritedToolIdSet ?? emptyDefaultToolIdSet;
   const columns = React.useMemo(
     () => [
       createCheckboxColumn(
@@ -131,12 +150,22 @@ export const ToolsFlatView: React.FC<ToolsFlatViewProps> = ({
         onToggleTool,
         disabled,
         areElasticCapabilitiesEnabled,
-        resolvedDefaultToolIdSet
+        resolvedDefaultToolIdSet,
+        resolvedInheritedToolIdSet,
+        inheritedTypeName
       ),
       createToolDetailsColumn(),
       createTagsColumn(),
     ],
-    [selectedTools, onToggleTool, disabled, areElasticCapabilitiesEnabled, resolvedDefaultToolIdSet]
+    [
+      selectedTools,
+      onToggleTool,
+      disabled,
+      areElasticCapabilitiesEnabled,
+      resolvedDefaultToolIdSet,
+      resolvedInheritedToolIdSet,
+      inheritedTypeName,
+    ]
   );
 
   const handleTableChange = React.useCallback(

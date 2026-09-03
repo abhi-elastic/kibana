@@ -20,6 +20,8 @@ export interface ActiveSkillRowProps {
   onRemove: (skill: PublicSkillSummary) => void;
   isRemoving?: boolean;
   isAutoIncluded: boolean;
+  /** Contributed by the agent's type; shown locked with its own badge. */
+  isInherited?: boolean;
   canEditAgent: boolean;
 }
 
@@ -30,6 +32,7 @@ export const ActiveSkillRow: React.FC<ActiveSkillRowProps> = ({
   onRemove,
   isRemoving = false,
   isAutoIncluded,
+  isInherited = false,
   canEditAgent,
 }) => {
   return (
@@ -43,7 +46,11 @@ export const ActiveSkillRow: React.FC<ActiveSkillRowProps> = ({
       removeAriaLabel={labels.agentSkills.removeSkillAriaLabel}
       canEditAgent={canEditAgent}
       readOnlyContent={
-        isAutoIncluded ? (
+        isInherited ? (
+          <EuiBadge color="hollow" data-test-subj={`agentBuilderInheritedSkill-${skill.id}`}>
+            {labels.agentSkills.inheritedFromTypeBadge}
+          </EuiBadge>
+        ) : isAutoIncluded ? (
           <EuiBadge color="hollow">{labels.agentSkills.elasticCapabilitiesReadOnlyBadge}</EuiBadge>
         ) : undefined
       }

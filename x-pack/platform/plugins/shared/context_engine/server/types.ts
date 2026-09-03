@@ -17,6 +17,7 @@ import type {
 import type { WorkflowsExtensionsServerPluginSetup } from '@kbn/workflows-extensions/server';
 import type { AiIndexProperties } from '../common/http_api/ai_indices';
 import type { AiIndexService } from './ai_indices/service';
+import type { FindingsServiceApi } from './findings/service';
 import type { ImprovementsServiceApi } from './improvements/service';
 import type { SignalsServiceApi } from './signals/service';
 
@@ -33,6 +34,11 @@ export interface ContextEnginePluginStart {
    * the store is a user-owned index, so Elasticsearch authorizes each read and write.
    */
   getImprovementsService: (esClient: ElasticsearchClient) => ImprovementsServiceApi;
+  /**
+   * The findings store (guided investigations), bound to the caller's Elasticsearch client for the
+   * same reason as improvements. Written by the `record_investigation` tool, read by the UI.
+   */
+  getFindingsService: (esClient: ElasticsearchClient) => FindingsServiceApi;
 }
 
 export interface ContextEngineSetupDependencies {

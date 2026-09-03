@@ -1,0 +1,64 @@
+# Context strategy catalog
+
+Guidance, not a menu. A systemic family is three choices you make from the data and the use case:
+the unit of context (the thing one KI is about), what one KI carries for that unit, and how units
+are enumerated and refreshed. The worked examples show how those choices were made before so you
+recognise the pattern; the right unit for a new AI index may be none of them (a customer, a
+service, a deployment, a product version, a time window). Name the unit in the data's own terms
+when the measurements point there.
+
+## Worked examples
+
+- Unit = index (index profiles). Chosen because discovery risk was high and every task started with
+  "which index". One KI per index carried purpose, key fields, join keys and sample values;
+  mechanical extraction plus a short LLM profile; static; `routing_only`. Pitfall: routing KIs alone
+  did not cut tokens; the agent still had to read the data.
+- Unit = case (case intelligence). Chosen because fan-out per case was high (feeds, issues, KB
+  articles on every answer path) and reading cost sat on every question about a case. One KI per
+  case carried problem, chronology, root cause, resolution and linked evidence; LLM extraction;
+  `cursor` freshness with eviction when the case changed. Pitfall: combined with index profiles, the
+  routing KI had to carry executable field names or the agent guessed schemas.
+- Unit = document fact. Chosen because tasks needed specific facts from long documents with low
+  fan-out. Several KIs per document, each a self-contained fact; LLM extraction; static.
+- Unit = dashboard (a non-data unit). Chosen because operational questions were already answered by
+  existing artifacts. Mechanical extraction of panel queries; `routing_only` or `query_ready` per
+  KI. Pitfall: routing is not query readiness. Kept as the example that the unit need not be a row.
+- Targeted KIs (constraint, workaround, disambiguation, task recipe). Not a family: individual KIs
+  authored from accepted findings and indexed by a plain writer workflow. They apply whenever
+  findings survive decisions, whatever the shape.
+
+## Selection rules (apply in order, state each in the proposal)
+
+1. A systemic family requires a shared pattern across 2 or more probes or task shapes and a
+   measured property that explains it (fan-out, reading cost, discovery risk, spread). Otherwise no
+   family. The unit is whatever the shared pattern is about, named from the data: the field the
+   fan-out was measured on, the index set the discovery risk was measured across.
+2. `text_only` access mode: KIs must carry facts. Anything whose value is an index name or a query
+   is out unless the KI content can carry the fact itself; `readiness` is `routing_only` never
+   `query_ready`.
+3. At most one primary and one secondary family. When two apply, the one serving more probes or
+   task shapes is primary.
+4. Unit count and cost estimate are mandatory. Units via `execute_esql`
+   (`FROM <index> | STATS units = COUNT_DISTINCT(<unit_key>)`, or the index count). Tokens per unit
+   from the measurements already taken: median fan-out x average long-text length in characters
+   / 4, plus about 1,500 tokens of prompt overhead per unit for LLM extraction; show a range and
+   label it an estimate. The pilot in the generation stage replaces it with the measured number.
+5. Shape: `systemic` when rule 1 yields a family and no unrelated findings survived;
+   `targeted_only` when rule 1 yields no family but findings survived; `both` when a family applies
+   and unrelated findings survived; `none` when neither. `targeted_only` and `none` are correct
+   outcomes when that is what the evidence supports, not fallbacks.
+
+## Family fields
+
+`family` (short name in the data's terms), `unit_key` (field or "index"), `unit_count`,
+`extraction` (`llm` when the KI needs synthesis across documents; `mechanical` when the fields
+can be copied), `freshness` (`static` when units do not change after creation; `cursor` when they
+do, from the freshness measurement), `readiness` (`query_ready` only when access mode is `queries`
+and the KI will carry a runnable query), `serves` (probe ids or task-shape measurement ids).
+
+## Three shapes downstream stages must handle
+
+- `systemic`: one workflow per family, foreach over units.
+- `targeted_only`: the planner authors KI content; a plain writer workflow indexes it with
+  provenance and verifiers, no source ES|QL, no summarisation.
+- `both`: the two above together.

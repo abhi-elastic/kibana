@@ -47,6 +47,7 @@ import { css } from '@emotion/react';
 import { FormattedMessage } from '@kbn/i18n-react';
 import { pushFlyoutPaddingStyles } from '../../../../common.styles';
 import { useAgentEdit } from '../../../hooks/agents/use_agent_edit';
+import { useAgentTypeBase } from '../../../hooks/agents/use_agent_type_base';
 import { useKibana } from '../../../hooks/use_kibana';
 import { useNavigation } from '../../../hooks/use_navigation';
 import { searchParamNames } from '../../../search_param_names';
@@ -68,6 +69,7 @@ import {
   getActivePlugins,
   getActiveSkills,
   getActiveTools,
+  getInheritedToolIdSet,
 } from '../../../utils/tool_selection_utils';
 
 const BUTTON_IDS = {
@@ -238,17 +240,34 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
   const enableElasticCapabilities = watch('configuration.enable_elastic_capabilities') ?? false;
   const defaultToolIdSet = useMemo(() => new Set<string>(defaultAgentToolIds), []);
 
+  const { typeBase } = useAgentTypeBase(editingAgentId);
+  const inheritedToolIdSet = useMemo(
+    () => getInheritedToolIdSet(tools, typeBase?.tools ?? []),
+    [tools, typeBase?.tools]
+  );
+  const inheritedSkillIdSet = useMemo(
+    () => new Set<string>(typeBase?.skillIds ?? []),
+    [typeBase?.skillIds]
+  );
+
   const agentTools = watch('configuration.tools');
   const activeToolsCount = useMemo(
     () =>
-      getActiveTools(tools, agentTools ?? [], enableElasticCapabilities, defaultToolIdSet).length,
-    [tools, agentTools, enableElasticCapabilities, defaultToolIdSet]
+      getActiveTools(
+        tools,
+        agentTools ?? [],
+        enableElasticCapabilities,
+        defaultToolIdSet,
+        inheritedToolIdSet
+      ).length,
+    [tools, agentTools, enableElasticCapabilities, defaultToolIdSet, inheritedToolIdSet]
   );
 
   const agentSkills = watch('configuration.skill_ids') as string[] | undefined;
   const activeSkillsCount = useMemo(
-    () => getActiveSkills(skills, agentSkills, enableElasticCapabilities).length,
-    [skills, agentSkills, enableElasticCapabilities]
+    () =>
+      getActiveSkills(skills, agentSkills, enableElasticCapabilities, inheritedSkillIdSet).length,
+    [skills, agentSkills, enableElasticCapabilities, inheritedSkillIdSet]
   );
 
   const agentPlugins = watch('configuration.plugin_ids') as string[] | undefined;
@@ -290,6 +309,8 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
             isLoading={isLoading}
             isFormDisabled={isFormDisabled || !canEditAgent}
             areElasticCapabilitiesEnabled={enableElasticCapabilities}
+            inheritedToolIdSet={inheritedToolIdSet}
+            inheritedTypeName={typeBase?.typeName}
           />
         ),
         append: (
@@ -317,6 +338,8 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
             isLoading={isLoading}
             isFormDisabled={isFormDisabled || !manageAgents}
             areElasticCapabilitiesEnabled={enableElasticCapabilities}
+            inheritedSkillIdSet={inheritedSkillIdSet}
+            inheritedTypeName={typeBase?.typeName}
           />
         ),
         append: (
@@ -384,6 +407,9 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
       permissions?.update_access_control,
       isExperimentalFeaturesEnabled,
       enableElasticCapabilities,
+      inheritedToolIdSet,
+      inheritedSkillIdSet,
+      typeBase?.typeName,
     ]
   );
 

@@ -101,6 +101,40 @@ describe('save_automation tool', () => {
     expect(createTool().id).toBe(CONTEXT_ENGINE_SAVE_AUTOMATION_TOOL_ID);
   });
 
+  describe('schema', () => {
+    const parse = (input: Record<string, unknown>) => createTool().schema.safeParse(input);
+
+    it('accepts a placeholder in the unused workflow field', () => {
+      expect(parse({ workflowAttachmentId: 'att-1', workflowId: '/' }).success).toBe(true);
+      expect(parse({ workflowAttachmentId: '', workflowId: 'wf-1' }).success).toBe(true);
+      expect(parse({ workflowAttachmentId: 'null', workflowId: 'wf-1', planId: '/' }).success).toBe(
+        true
+      );
+    });
+
+    it('accepts the same id in both workflow fields', () => {
+      expect(parse({ workflowAttachmentId: 'wf-1', workflowId: 'wf-1' }).success).toBe(true);
+    });
+
+    it('rejects two different real workflow references with a message that names both', () => {
+      const result = parse({ workflowAttachmentId: 'att-1', workflowId: 'wf-1' });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).toContain('leave the other field out entirely');
+    });
+
+    it('rejects a call with no real workflow reference', () => {
+      const result = parse({ workflowAttachmentId: '/', workflowId: '' });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).toContain('Provide workflowAttachmentId');
+    });
+
+    it('accepts planIds alongside planId', () => {
+      expect(parse({ workflowId: 'wf-1', planId: 'ki-a', planIds: ['ki-a', 'ki-b'] }).success).toBe(
+        true
+      );
+    });
+  });
+
   it('uses always confirmation policy with workflow and ai index names', async () => {
     const tool = createTool();
     const attachments = createAttachments();

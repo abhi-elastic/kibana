@@ -7,11 +7,12 @@
 
 import { isToolResultEvent, ToolResultType, type ToolResult } from '@kbn/agent-builder-common';
 import type { AgentBuilderPluginStart } from '@kbn/agent-builder-browser';
-import type { ApplicationStart } from '@kbn/core/public';
+import type { ApplicationStart, HttpStart } from '@kbn/core/public';
 import type { SuggestAutomationProvider } from '@kbn/context-engine-plugin/public/types';
 import { i18n } from '@kbn/i18n';
 import { EMPTY, switchMap } from 'rxjs';
 import { AI_INDEX_ATTACHMENT_TYPE } from '../common/agent_builder_attachments';
+import { ensureContextEngineAgentId } from './ensure_agent';
 import { KI_AUTOMATION_GENERATION_SKILL_ID } from '../common/agent_builder_skills';
 import { CONTEXT_ENGINE_SAVE_AUTOMATION_TOOL_ID } from '../common/agent_builder_tools';
 
@@ -45,9 +46,11 @@ const getAutomationToolAiIndexId = (result: ToolResult): string | undefined => {
 export const createSuggestAutomationProvider = ({
   agentBuilder,
   application,
+  http,
 }: {
   agentBuilder: AgentBuilderPluginStart | undefined;
   application: ApplicationStart;
+  http: HttpStart;
 }): SuggestAutomationProvider => ({
   canSuggest: ({ aiIndex, isManaged }) =>
     aiIndex !== undefined &&
@@ -55,16 +58,18 @@ export const createSuggestAutomationProvider = ({
     application.capabilities[AGENT_BUILDER_CAPABILITY]?.show === true &&
     agentBuilder?.openChat !== undefined,
 
-  suggestAutomation: ({ aiIndex }) => {
+  suggestAutomation: async ({ aiIndex }) => {
     if (!agentBuilder?.openChat) {
       return;
     }
 
+    const agentId = await ensureContextEngineAgentId(http);
     agentBuilder.openChat({
       newConversation: true,
       autoSendInitialMessage: false,
       initialMessage: SUGGEST_AUTOMATION_INITIAL_MESSAGE,
       sessionTag: `context-engine-ai-index-${aiIndex.id}`,
+      ...(agentId ? { agentId } : {}),
       attachments: [
         {
           id: aiIndex.id,

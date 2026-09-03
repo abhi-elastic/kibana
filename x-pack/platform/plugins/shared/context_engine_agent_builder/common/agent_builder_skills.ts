@@ -8,3 +8,5 @@
 export const KI_AUTOMATION_GENERATION_SKILL_ID = 'ki-automation-generation' as const;
 
 export const KI_RETRIEVAL_SKILL_ID = 'ki-retrieval' as const;
+export const KI_INVESTIGATION_SKILL_ID = 'ki-investigation' as const;
+export const KI_OPPORTUNITY_PLANNER_SKILL_ID = 'ki-opportunity-planner' as const;

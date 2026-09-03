@@ -248,6 +248,7 @@ export class AgentsService {
       ensure,
       resolveAgentConfiguration,
       resolveAgentBaseConfiguration,
+      getAgentType: (typeId: string) => this.typeRegistry.get(typeId),
       removeToolRefsFromAgents,
       getAgentsUsingTools,
       removePluginRefsFromAgents,

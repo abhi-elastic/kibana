@@ -19,6 +19,8 @@ interface ToolsTabProps {
   isLoading: boolean;
   isFormDisabled: boolean;
   areElasticCapabilitiesEnabled: boolean;
+  inheritedToolIdSet?: ReadonlySet<string>;
+  inheritedTypeName?: string;
 }
 
 export const ToolsTab: React.FC<ToolsTabProps> = ({
@@ -27,6 +29,8 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
   isLoading,
   isFormDisabled,
   areElasticCapabilitiesEnabled,
+  inheritedToolIdSet,
+  inheritedTypeName,
 }) => {
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const showActiveOnlyChangeHandler = !isFormDisabled ? setShowActiveOnly : undefined;
@@ -47,6 +51,8 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
             showActiveOnly={showActiveOnly || isFormDisabled}
             onShowActiveOnlyChange={showActiveOnlyChangeHandler}
             areElasticCapabilitiesEnabled={areElasticCapabilitiesEnabled}
+            inheritedToolIdSet={inheritedToolIdSet}
+            inheritedTypeName={inheritedTypeName}
           />
         )}
       />

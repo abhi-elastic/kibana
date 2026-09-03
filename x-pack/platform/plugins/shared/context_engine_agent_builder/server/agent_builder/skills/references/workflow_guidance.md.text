@@ -1,0 +1,118 @@
+# KI workflow guidance
+
+What every KI workflow must contain, the steps it is built from, and what goes wrong. The unit of
+context comes from the plan spec, not from here.
+
+## Required parts
+
+1. Inputs: `ai_index_id` (the AI index id, not the backing index name), `plan_id` (the
+   `plan_item_id` this workflow implements), and `unit_filter` (optional; when set, only matching
+   units are processed, which is how the pilot runs). Declare them under `inputs`.
+2. Unit enumeration when the spec is per-unit: a `foreach` over the rows of an
+   `elasticsearch.esql.query` step (one row per unit, `LIMIT` on the query) or, for the static
+   writer, over the authored KI array passed as an input constant.
+3. `context-engine.verifyKi` before every `context-engine.createKi`, on the same `ki` object: build
+   the object once with a `data.set` step, verify it, write only inside an `if` on
+   `steps.verify_ki.output.passed`, and surface `steps.verify_ki.output.results` (verifier and
+   reason) with a `console` step in the `else` branch. Never write ungated.
+4. Provenance on every KI: `tags` include `plan:<plan_item_id>` and, when the KI comes from a
+   finding, `finding:<finding_id>`; `attributes.plan_id` (string) and `attributes.finding_id`
+   (string) carry the same ids, plus `attributes.source_query` (one ES|QL string, or an array of
+   ES|QL strings when several queries produced the KI) or `attributes.trace_ids` (non-empty array
+   of strings). `attributes` values are strings, numbers, booleans or string arrays, never nested
+   objects. The `provenance-present` verifier fails without `plan_id` plus one of the other three.
+5. A refresh cursor when the spec says `cursor`: read the last processed timestamp or unit key
+   from the AI index (an `elasticsearch.esql.query` on `ai-index-idx-<ai_index_id>` with
+   `MAX(TO_DATETIME(FIELD_EXTRACT(attributes, "cursor")))`, or an `elasticsearch.search` with
+   `ignore_unavailable: true` so the first run does not fail) and filter units to those changed
+   since; write the new cursor into `attributes.cursor` on each KI. Skip unchanged units.
+6. A scheduled trigger only when the plan asks for one (`type: scheduled`, interval at least
+   `1m` or an rrule); otherwise `triggers: [{ type: manual }]`.
+7. `LIMIT` on every source query, and a pilot mode: with `unit_filter` set or a `pilot: true`
+   input, process at most 3 units. Expansion removes the pilot bound, never the `LIMIT`.
+8. Stable `ki_id` from the unit (`<family_id>/<normalised unit id>`, or the planner's `ki_id` for
+   targeted KIs) so re-runs replace rather than duplicate.
+9. Signal dual-write when the plan item says `signal`: a second verified `createKi` against the
+   signals AI index id with the same `ki` object plus the tag `signal`. Both writes carry
+   `finding:<id>`.
+
+## Steps and their contracts
+
+- `context-engine.createKi` with `ai_index_id`, `ki_id` (optional), `ki`; returns `id`. Sets
+  `@timestamp` itself; auto-creates an index-backed AI index; requires `type` and `title` in `ki`.
+- `context-engine.updateKi` with `ai_index_id`, `ki_id`, partial `ki`; returns `id`, `result`.
+- `context-engine.deleteKi` with `ai_index_id`, `ki_id`; returns `id`.
+- `context-engine.verifyKi` with `ki` and optional `execute_esql: true`; returns `passed` and
+  `results[]` of `{ verifier, passed, reason }`. Verifiers: `schema-shape` (always),
+  `provenance-present` (planned KIs), `esql-valid-syntax` and `index-exists` (when
+  `attributes.esql` / `attributes.index` are set), `esql-executes` (only with `execute_esql`,
+  runs each query with `| LIMIT 0`; use it in the pilot, not on every scheduled run).
+- `context-engine.createKi` also accepts `verify: true` (same verifiers, fails the step instead of
+  writing); the separate `verifyKi` gate is preferred because its `else` branch reports reasons.
+- `elasticsearch.esql.query` with `query`, `format: json`; returns `columns[]` and `values[][]`.
+- `elasticsearch.search` with `index`, `query`, `size`, `ignore_unavailable`; returns the raw
+  search response (`hits.hits[]._source`).
+- `ai.prompt` with `prompt`, optional `systemPrompt`, optional `schema` (JSON Schema for
+  structured output), optional `connector-id` at step level; returns `output.content` (a string,
+  or the parsed object when `schema` is set) and `output.metadata`.
+- `foreach` with `foreach: "${{ steps.units.output.values }}"` and nested `steps`; the current
+  row is `foreach.item`, the index `foreach.index`.
+- `if` with `condition`, `steps` and a non-empty `else`. `condition` takes a typed expression
+  (`"${{ steps.verify_ki.output.passed }}"`, preferred for a boolean) or a KQL string
+  (`steps.verify_ki.output.status : 'success'`).
+- `data.set` with the variable names directly under `with` (`with: { ki: "${{ … }}" }`), never
+  nested under a `variables` key; read them back as `${{ variables.<name> }}` or
+  `${{ steps.<step name>.output.<name> }}`.
+- `console` with `message` for visible diagnostics.
+
+Confirm exact parameter names with `platform.workflows.get_step_definitions` before writing a step
+you have not used in this conversation.
+
+## Typing rules to pass to `generate_workflow` verbatim
+
+`generate_workflow` is a separate generator that sees only your `context`, and its own docs cover
+Liquid `{{ }}` but not typed expressions, so left alone it passes objects and booleans as strings
+and every `verifyKi` fails. Copy this block into every `generate_workflow` call, unchanged:
+
+```
+Typing rules for this workflow:
+- A `with` value that is exactly "${{ expr }}" evaluates to the typed value (object, array,
+  boolean). "{{ expr }}" renders text. Never use `| json` to pass an object between steps.
+- Pass the KI object as ki: "${{ variables.ki }}" or ki: "${{ foreach.item.ki }}".
+- foreach: "${{ inputs.kis }}" or "${{ steps.units.output.values }}", never with `| json`.
+- Booleans: execute_esql: "${{ inputs.pilot }}", not "{{ inputs.pilot }}".
+- data.set puts its variable names directly under `with`, not under a `variables` key; read them
+  back as "${{ variables.<name> }}".
+- if steps use condition: "${{ steps.verify_ki.output.passed }}"; the else branch must not be empty.
+- Never set @timestamp inside the ki object; createKi sets it.
+```
+
+## Syntax gotchas
+
+Beyond the typing rules above:
+
+- `verifyKi` and `createKi` reject a `ki` that arrived as text or resolved to nothing, and the
+  error names the fix. A verifier reason that reads "`ki` arrived as a string" or "`ki` is
+  undefined" is a templating bug, not a KI content problem.
+- `ai.prompt` output lives under `output.content.*`; a field named `summary` is
+  `${{ steps.profile.output.content.summary }}`, not `steps.profile.output.summary`. Structured
+  output only exists when `schema` declares it.
+- `elasticsearch.esql.query` rows are arrays, so `foreach.item[0]` is the first column; when a
+  step needs names, `EVAL` and `KEEP` the columns in a fixed order and read them by position, or
+  `RENAME` then map them into a `data.set` object at the top of the loop body.
+- Multi-valued fields need `field : "value"` (match), not `field == "value"`.
+- Fields with `ignore_above` exceeded, and `text` fields without a keyword sub-field, cannot be
+  filtered or aggregated in ES|QL; use `field.keyword` or `CATEGORIZE(field)`.
+- A long-running `foreach` must be bounded: `LIMIT` the enumeration query and, above roughly 500
+  units, page with a `while` loop and an offset or a cursor on a sortable key.
+- `attributes` is `flattened`: numbers and dates inside it are keywords, so compare with
+  `TO_DOUBLE(FIELD_EXTRACT(attributes, "confidence"))` or
+  `TO_DATETIME(FIELD_EXTRACT(attributes, "expires_at"))`.
+- Never write with `elasticsearch.index`; `ai_index_id` must match `^[a-z0-9][a-z0-9_-]*$`.
+
+## Static writer shape (targeted KIs)
+
+Input: an `inputs.kis` array of authored KI objects (each already carrying `type`, `title`,
+`content`, `tags` with `plan:` and `finding:`, provenance attributes). A `foreach` over the array
+verifies each item with `verifyKi`, then `createKi` with the planner's `ki_id`, and the signal
+copy when the item is marked `signal`. No source ES|QL, no `ai.prompt`.

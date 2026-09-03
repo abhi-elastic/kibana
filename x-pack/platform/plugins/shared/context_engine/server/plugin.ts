@@ -16,7 +16,11 @@ import type { Logger } from '@kbn/logging';
 import { schema } from '@kbn/config-schema';
 import { i18n } from '@kbn/i18n';
 import { CONTEXT_ENGINE_ENABLED_SETTING_ID } from '@kbn/management-settings-ids';
-import { CONTEXT_ENGINE_FEEDBACK_LOOP_ENABLED_SETTING_ID } from '../common/constants';
+import {
+  CONTEXT_ENGINE_FEEDBACK_LOOP_ENABLED_SETTING_ID,
+  CONTEXT_ENGINE_GUIDED_INVESTIGATION_ENABLED_SETTING_ID,
+} from '../common/constants';
+import { registerSignalKisAiIndex } from './ai_indices/signal_kis_ai_index';
 import { apiPrivileges } from '../common/features';
 import type {
   ContextEnginePluginSetup,
@@ -27,14 +31,19 @@ import type {
 import { registerFeatures } from './features';
 import { registerAiIndexRoutes } from './routes/ai_indices';
 import { registerSignalRoutes } from './routes/signals';
+import { registerInvestigationScopeRoutes } from './routes/investigation_scope';
+import { registerFindingsRoutes } from './routes/findings';
 import { AiIndexService } from './ai_indices/service';
 import { AiIndexRegistry } from './ai_indices/registry';
+import { FindingsService } from './findings/service';
+import { installFindingsIndexTemplate } from './findings/storage';
 import { ImprovementsService } from './improvements/service';
 import { installImprovementsIndexTemplate } from './improvements/storage';
 import { SignalsService } from './signals/service';
 import type { SignalsServiceApi } from './signals/service';
 import { registerSignalGeneratorTaskDefinition, scheduleSignalGenerator } from './tasks';
 import { createVerifyKiStepDefinition } from './step_types/verify_ki_step';
+import { createKiVerifierRegistry, KiVerificationService } from './ki_verification';
 import { registerStepDefinitions } from './step_types';
 import { ContextEngineAnalyticsService } from './telemetry';
 
@@ -51,6 +60,7 @@ export class ContextEnginePlugin
   private aiIndexService?: AiIndexService;
   private signalsService?: SignalsService;
   private createImprovementsService?: (esClient: ElasticsearchClient) => ImprovementsService;
+  private createFindingsService?: (esClient: ElasticsearchClient) => FindingsService;
   private esClient?: ElasticsearchClient;
   private isFeedbackLoopEnabled: () => Promise<boolean> = async () => false;
   private readonly aiIndexRegistry = new AiIndexRegistry();
@@ -73,8 +83,14 @@ export class ContextEnginePlugin
     this.analyticsService.registerContextEngineEventTypes();
     const analyticsService = this.analyticsService;
 
+    const verificationService = new KiVerificationService(createKiVerifierRegistry());
     setupDeps.workflowsExtensions.registerStepDefinition(
-      createVerifyKiStepDefinition(coreSetup, this.logger.get('context_steps'), analyticsService)
+      createVerifyKiStepDefinition(
+        coreSetup,
+        this.logger.get('context_steps'),
+        analyticsService,
+        verificationService
+      )
     );
 
     coreSetup.uiSettings.registerGlobal({
@@ -86,6 +102,23 @@ export class ContextEnginePlugin
           defaultMessage:
             'Generates classified signals from Agent Builder traces to power the Context Engine feedback loop.',
         }),
+        schema: schema.boolean(),
+        value: false,
+        experimental: true,
+        requiresPageReload: false,
+        readonly: false,
+      },
+      [CONTEXT_ENGINE_GUIDED_INVESTIGATION_ENABLED_SETTING_ID]: {
+        name: i18n.translate('xpack.contextEngine.uiSettings.guidedInvestigation.name', {
+          defaultMessage: 'Context Engine guided investigation',
+        }),
+        description: i18n.translate(
+          'xpack.contextEngine.uiSettings.guidedInvestigation.description',
+          {
+            defaultMessage:
+              'Lets an Agent Builder agent investigate an AI index’s sources and agent traces to find Knowledge Indicator opportunities.',
+          }
+        ),
         schema: schema.boolean(),
         value: false,
         experimental: true,
@@ -128,6 +161,7 @@ export class ContextEnginePlugin
         }
         return this.createImprovementsService(esClient);
       },
+      getFindingsService: (esClient) => this.requireFindingsService(esClient),
       getActions: async () => {
         const [, startDeps] = await coreSetup.getStartServices();
         return startDeps.actions;
@@ -136,6 +170,7 @@ export class ContextEnginePlugin
 
     registerStepDefinitions({
       workflowsExtensions: setupDeps.workflowsExtensions,
+      verificationService,
       analyticsService,
       logger: this.logger.get('context_steps'),
       getAiIndexService: () => {
@@ -166,6 +201,21 @@ export class ContextEnginePlugin
       },
     });
 
+    registerInvestigationScopeRoutes({
+      router,
+      logger: this.logger.get('routes'),
+      getSpaces: async () => {
+        const [, startDeps] = await coreSetup.getStartServices();
+        return startDeps.spaces;
+      },
+    });
+
+    registerFindingsRoutes({
+      router,
+      logger: this.logger.get('routes'),
+      getFindingsService: (esClient) => this.requireFindingsService(esClient),
+    });
+
     // Read-only Signals routes (reads run as the current user, scoped to the active space).
     registerSignalRoutes({
       router,
@@ -176,6 +226,8 @@ export class ContextEnginePlugin
       // Reads the current value at request time (assigned in start(), after this setup() runs).
       getFeedbackLoopEnabled: () => this.isFeedbackLoopEnabled(),
     });
+
+    registerSignalKisAiIndex(this.aiIndexRegistry);
 
     return {
       registerAiIndex: (id, properties) => this.aiIndexRegistry.register(id, properties),
@@ -215,6 +267,21 @@ export class ContextEnginePlugin
         }`
       );
     });
+
+    const findingsLogger = this.logger.get('findings');
+    this.createFindingsService = (esClient: ElasticsearchClient) =>
+      new FindingsService({ esClient, logger: findingsLogger });
+    const createFindingsService = this.createFindingsService;
+
+    installFindingsIndexTemplate({ esClient: this.esClient, logger: findingsLogger }).catch(
+      (err) => {
+        findingsLogger.warn(
+          `Failed to install the findings index template: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+    );
 
     const aiIndexService = this.aiIndexService;
     const registry = this.aiIndexRegistry;
@@ -259,8 +326,16 @@ export class ContextEnginePlugin
       },
       getSignalsService: () => signalsService,
       getImprovementsService: (esClient) => createImprovementsService(esClient),
+      getFindingsService: (esClient) => createFindingsService(esClient),
     };
   }
 
   stop() {}
+
+  private requireFindingsService(esClient: ElasticsearchClient): FindingsService {
+    if (!this.createFindingsService) {
+      throw new Error('Findings service not available — plugin has not started');
+    }
+    return this.createFindingsService(esClient);
+  }
 }

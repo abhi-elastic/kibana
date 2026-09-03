@@ -18,23 +18,88 @@ import type { SecurityPluginStart } from '@kbn/security-plugin/server';
 import type { WorkflowsServerPluginSetup } from '@kbn/workflows-management-plugin/server';
 import { parseYamlToJSONWithoutValidation } from '@kbn/workflows-yaml';
 import type { AiIndexService } from '@kbn/context-engine-plugin/server/ai_indices/service';
+import type { FindingsServiceApi } from '@kbn/context-engine-plugin/server/findings/service';
+import type { InvestigationRecord } from '@kbn/context-engine-plugin/common/http_api/findings';
+import { buildInvestigationAttachmentData } from '@kbn/context-engine-plugin/common/investigation_schemas';
 import {
   AI_INDEX_ATTACHMENT_TYPE,
   WORKFLOW_YAML_ATTACHMENT_TYPE,
 } from '../../../../common/agent_builder_attachments';
 import { assertContextEngineWriteAccess } from '../../assert_context_engine_write_access';
+import { resolveInvestigationId } from '../record_investigation/handler';
 
 export interface SaveAutomationParams {
   workflowAttachmentId?: string;
   workflowId?: string;
   aiIndexId?: string;
+  planId?: string;
+  planIds?: string[];
+}
+
+/** Params after placeholder values are dropped and `planId` / `planIds` are merged. */
+export interface NormalizedSaveAutomationParams {
+  workflowAttachmentId?: string;
+  workflowId?: string;
+  aiIndexId?: string;
+  planIds: string[];
 }
 
 export interface SaveAutomationResult {
   aiIndexId: string;
   workflowId: string;
   status: 'saved_and_attached' | 'attached' | 'already_attached';
+  /** Set when plan item ids linked the workflow to an investigation plan. */
+  plan?: { planIds: string[]; investigationId: string; stage: string };
 }
+
+const PLACEHOLDER_VALUES = new Set(['null', 'undefined', 'none', 'n/a', 'na']);
+
+/**
+ * Models fill optional string arguments they do not mean with placeholders such as `"/"`, `""`
+ * or `"null"` rather than omitting them. Treat those as absent so the xor between
+ * `workflowAttachmentId` and `workflowId` is judged on real values only.
+ */
+export const isPlaceholderValue = (value: unknown): boolean => {
+  if (typeof value !== 'string') {
+    return true;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || /^[/\\._-]+$/.test(trimmed)) {
+    return true;
+  }
+  return PLACEHOLDER_VALUES.has(trimmed.toLowerCase());
+};
+
+const realValue = (value: unknown): string | undefined =>
+  isPlaceholderValue(value) ? undefined : (value as string).trim();
+
+/**
+ * Drops placeholder values, merges `planId` and `planIds` into one deduplicated list, and treats
+ * a `workflowId` equal to the `workflowAttachmentId` as the attachment reference (a workflow
+ * loaded with `get_workflow(attach: true)` uses its id as the attachment id).
+ */
+export const normalizeSaveAutomationParams = (
+  params: SaveAutomationParams
+): NormalizedSaveAutomationParams => {
+  const workflowAttachmentId = realValue(params.workflowAttachmentId);
+  let workflowId = realValue(params.workflowId);
+  if (workflowAttachmentId && workflowId === workflowAttachmentId) {
+    workflowId = undefined;
+  }
+  const planIds = [
+    ...new Set(
+      [params.planId, ...(params.planIds ?? [])]
+        .map(realValue)
+        .filter((id): id is string => id !== undefined)
+    ),
+  ];
+  return {
+    ...(workflowAttachmentId ? { workflowAttachmentId } : {}),
+    ...(workflowId ? { workflowId } : {}),
+    ...(realValue(params.aiIndexId) ? { aiIndexId: realValue(params.aiIndexId) } : {}),
+    planIds,
+  };
+};
 
 type WorkflowsManagementApi = WorkflowsServerPluginSetup['management'];
 
@@ -308,7 +373,106 @@ const persistWorkflowFromAttachment = async ({
   return { workflowId: created.id, newlyCreated: true };
 };
 
+/**
+ * Writes the saved workflow id onto every named plan item and versions the investigation
+ * attachment to `generated`. Runs after the automation is attached; a failure here is reported,
+ * not rolled back, because the workflow is already live on the AI index.
+ */
+const linkWorkflowToPlan = async ({
+  planIds,
+  workflowId,
+  attachments,
+  getFindingsService,
+  logger,
+}: {
+  planIds: string[];
+  workflowId: string;
+  attachments: AttachmentStateManager;
+  getFindingsService: () => Promise<FindingsServiceApi>;
+  logger: Logger;
+}): Promise<SaveAutomationResult['plan']> => {
+  const { investigationId, attachment } = resolveInvestigationId(attachments);
+  const service = await getFindingsService();
+  let investigation: InvestigationRecord | undefined;
+  for (const planItemId of planIds) {
+    ({ investigation } = await service.recordOutcome({ investigationId, planItemId, workflowId }));
+  }
+  if (!investigation) {
+    throw new Error('At least one plan item id is required to link a workflow to the plan.');
+  }
+  if (attachment) {
+    const [findings, priorDecisions] = await Promise.all([
+      investigation.finding_ids.length > 0 ? service.getFindings(investigation.finding_ids) : [],
+      service.priorDecisions(investigation.ai_index_id),
+    ]);
+    const updated = await attachments.update(
+      attachment.id,
+      { data: buildInvestigationAttachmentData({ investigation, findings, priorDecisions }) },
+      ATTACHMENT_REF_ACTOR.agent
+    );
+    if (!updated) {
+      logger.warn(
+        `Workflow '${workflowId}' was linked to plan items '${planIds.join(
+          ', '
+        )}' but attachment '${attachment.id}' could not be updated.`
+      );
+    }
+  }
+  return { planIds, investigationId, stage: investigation.stage };
+};
+
 export const saveAutomationHandler = async ({
+  params,
+  request,
+  spaceId,
+  attachments,
+  logger,
+  getAiIndexService,
+  getFindingsService,
+  getCoreStart,
+  getSecurityStart,
+  getWorkflowsManagement,
+}: {
+  params: SaveAutomationParams;
+  request: KibanaRequest;
+  spaceId: string;
+  attachments: AttachmentStateManager;
+  logger: Logger;
+  getAiIndexService: () => Promise<AiIndexService>;
+  getFindingsService?: () => Promise<FindingsServiceApi>;
+  getCoreStart: () => Promise<CoreStart>;
+  getSecurityStart: () => Promise<SecurityPluginStart | undefined>;
+  getWorkflowsManagement: () => WorkflowsManagementApi;
+}): Promise<SaveAutomationResult> => {
+  const normalized = normalizeSaveAutomationParams(params);
+  const saved = await saveAutomation({
+    params: normalized,
+    request,
+    spaceId,
+    attachments,
+    logger,
+    getAiIndexService,
+    getCoreStart,
+    getSecurityStart,
+    getWorkflowsManagement,
+  });
+  if (normalized.planIds.length === 0) {
+    return saved;
+  }
+  if (!getFindingsService) {
+    throw new Error('planId was provided but the findings store is not available.');
+  }
+  const plan = await linkWorkflowToPlan({
+    planIds: normalized.planIds,
+    workflowId: saved.workflowId,
+    attachments,
+    getFindingsService,
+    logger,
+  });
+  return { ...saved, plan };
+};
+
+const saveAutomation = async ({
   params,
   request,
   spaceId,
@@ -319,7 +483,7 @@ export const saveAutomationHandler = async ({
   getSecurityStart,
   getWorkflowsManagement,
 }: {
-  params: SaveAutomationParams;
+  params: NormalizedSaveAutomationParams;
   request: KibanaRequest;
   spaceId: string;
   attachments: AttachmentStateManager;
@@ -364,7 +528,9 @@ export const saveAutomationHandler = async ({
   }
 
   if (!params.workflowAttachmentId) {
-    throw new Error('Provide either workflowAttachmentId or workflowId.');
+    throw new Error(
+      'Provide workflowAttachmentId (the attachment_id returned by generate_workflow) or workflowId (a saved workflow id). Leave the other one out entirely.'
+    );
   }
 
   const {

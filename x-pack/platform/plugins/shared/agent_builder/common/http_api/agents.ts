@@ -9,6 +9,7 @@ import type {
   AgentAccessControl,
   AgentAccessControlEntry,
   AgentDefinition,
+  ToolSelection,
 } from '@kbn/agent-builder-common';
 
 export interface AgentPermissions {
@@ -63,6 +64,19 @@ export interface ListAgentAiIndicesResponse {
 export interface GetAgentAiIndicesResponse {
   ai_indices: AgentAiIndexEntry[];
   warnings?: AgentAiIndicesWarning[];
+}
+
+/**
+ * Response shape for `GET /internal/agent_builder/agents/{id}/_type_base`.
+ *
+ * The tools and skills an agent inherits from its type. The public agent APIs return only the
+ * agent's own configuration, so without this a client cannot show what the type contributes.
+ */
+export interface GetAgentTypeBaseResponse {
+  agent_type: string;
+  agent_type_name?: string;
+  tools: ToolSelection[];
+  skill_ids: string[];
 }
 
 /**

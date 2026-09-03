@@ -58,6 +58,8 @@ export interface AgentsServiceStart {
     agentType: string;
     request: KibanaRequest;
   }) => Promise<AgentBaseConfiguration | undefined>;
+  /** The registered agent type definition, or undefined for an unknown type id. */
+  getAgentType: (typeId: string) => AgentTypeDefinition | undefined;
   removeToolRefsFromAgents: (params: ToolRefsParams) => Promise<AgentsUsingToolsResult>;
   getAgentsUsingTools: (params: ToolRefsParams) => Promise<AgentsUsingToolsResult>;
   removePluginRefsFromAgents: (params: PluginRefsParams) => Promise<AgentsUsingToolsResult>;

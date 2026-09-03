@@ -19,31 +19,6 @@ import { CONTEXT_ENGINE_PATHS } from '../paths';
 import { CONTEXT_ENGINE_BACK_BUTTON_TEST_SUBJ } from '../layout/context_engine_page_header';
 import { CreateAiIndexPage } from './create_ai_index_page';
 
-jest.mock('@kbn/esql/public', () => ({
-  ESQLLangEditor: ({
-    query,
-    onTextLangQueryChange,
-  }: {
-    query: { esql: string };
-    onTextLangQueryChange: (query: { esql: string }) => void;
-  }) => (
-    <textarea
-      data-test-subj="mockEsqlEditor"
-      value={query.esql}
-      onChange={(event) => onTextLangQueryChange({ esql: event.target.value })}
-    />
-  ),
-}));
-
-jest.mock('../hooks/use_data_connectors', () => ({
-  useDataConnectors: () => ({
-    connectors: [],
-    connectorNameById: new Map(),
-    connectorActionTypeById: new Map(),
-    isLoading: false,
-  }),
-}));
-
 const renderWithProviders = (services: ReturnType<typeof coreMock.createStart>) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -65,11 +40,6 @@ const renderWithProviders = (services: ReturnType<typeof coreMock.createStart>) 
       </I18nProvider>
     </ChromeServiceProvider>
   );
-};
-
-const addEsqlSource = (query: string) => {
-  fireEvent.change(screen.getByTestId('mockEsqlEditor'), { target: { value: query } });
-  fireEvent.click(screen.getByTestId('contextAddEsqlSourceButton'));
 };
 
 const typeId = (id: string) => {
@@ -183,14 +153,17 @@ describe('CreateAiIndexPage', () => {
     });
   });
 
-  it('creates an index-backed AI index and navigates to its detail page', async () => {
+  it('creates an index-backed AI index with no sources and navigates to its detail page', async () => {
     const services = coreMock.createStart();
     services.http.post.mockResolvedValue({});
 
     renderWithProviders(services);
 
+    // Sources and storage type are configured on the Overview page, not here.
+    expect(screen.queryByTestId('contextAddEsqlSourceButton')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('contextAiIndexStorageType-index')).not.toBeInTheDocument();
+
     typeId(VALID_ID);
-    addEsqlSource('FROM logs-* | LIMIT 10');
     fireEvent.click(screen.getByTestId('contextCreateAiIndexButton'));
 
     await waitFor(() => {
@@ -201,7 +174,7 @@ describe('CreateAiIndexPage', () => {
             id: VALID_ID,
             dest: { type: 'index', value: 'ai-index-idx-support-ticket-triage' },
             automations: [],
-            sources: [{ type: 'esql', value: 'FROM logs-* | LIMIT 10' }],
+            sources: [],
           }),
         })
       );
@@ -212,32 +185,6 @@ describe('CreateAiIndexPage', () => {
     });
   });
 
-  it('creates a data-stream-backed AI index when that storage type is selected', async () => {
-    const services = coreMock.createStart();
-    services.http.post.mockResolvedValue({});
-
-    renderWithProviders(services);
-
-    typeId(VALID_ID);
-    addEsqlSource('FROM logs-* | LIMIT 10');
-    fireEvent.click(screen.getByTestId('contextAiIndexStorageType-data_stream'));
-    fireEvent.click(screen.getByTestId('contextCreateAiIndexButton'));
-
-    await waitFor(() => {
-      expect(services.http.post).toHaveBeenCalledWith(
-        '/api/context_engine/ai_index',
-        expect.objectContaining({
-          body: JSON.stringify({
-            id: VALID_ID,
-            dest: { type: 'data_stream', value: 'ai-index-ds-support-ticket-triage' },
-            automations: [],
-            sources: [{ type: 'esql', value: 'FROM logs-* | LIMIT 10' }],
-          }),
-        })
-      );
-    });
-  });
-
   it('does not navigate when the create request fails', async () => {
     const services = coreMock.createStart();
     services.http.post.mockRejectedValue(new Error('boom'));
@@ -245,7 +192,6 @@ describe('CreateAiIndexPage', () => {
     renderWithProviders(services);
 
     typeId(VALID_ID);
-    addEsqlSource('FROM logs-* | LIMIT 10');
     fireEvent.click(screen.getByTestId('contextCreateAiIndexButton'));
 
     await waitFor(() => {

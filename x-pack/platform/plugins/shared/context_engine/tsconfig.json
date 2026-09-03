@@ -39,6 +39,8 @@
     "@kbn/kibana-react-plugin",
     "@kbn/esql",
     "@kbn/esql-language",
+    "@kbn/esql-utils",
+    "@kbn/datemath",
     "@kbn/workflows",
     "@kbn/workflows-extensions",
     "@kbn/zod",

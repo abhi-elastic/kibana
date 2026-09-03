@@ -114,7 +114,11 @@ export class ContextEnginePlugin
         ]);
         const [coreStart, pluginsStart] = await core.getStartServices();
         const agentBuilder = await getAgentBuilder();
-        const chatOpener = createAnalyzeChatOpener({ coreStart, agentBuilder });
+        const chatOpener = createAnalyzeChatOpener({
+          coreStart,
+          agentBuilder,
+          getAgentBuilderIntegration,
+        });
         coreStart.chrome.docTitle.change(APP_TITLE);
         const appChrome = getAppChromeAdapter();
         await appChrome?.handleOnAppMount();

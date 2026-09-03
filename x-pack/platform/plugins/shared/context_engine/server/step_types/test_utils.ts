@@ -9,6 +9,7 @@ import type { StepHandlerContext } from '@kbn/workflows-extensions/server';
 import type { Logger } from '@kbn/logging';
 import type { AiIndexDest } from '../../common/http_api/ai_indices';
 import type { AiIndexService } from '../ai_indices/service';
+import type { KiVerificationService, KiVerificationSummary } from '../ki_verification';
 import type { ContextEngineAnalyticsService } from '../telemetry';
 
 /** Builds a minimal step handler context with a mocked scoped ES client. */
@@ -57,3 +58,11 @@ export const mockKiStepTelemetry = () => ({
     error: jest.fn(),
   } as unknown as Logger,
 });
+
+/** A verification service returning a fixed summary (passing and empty by default). */
+export const mockVerificationService = (
+  summary: KiVerificationSummary = { passed: true, results: [] }
+): jest.Mocked<KiVerificationService> =>
+  ({
+    verifyKi: jest.fn().mockResolvedValue(summary),
+  } as unknown as jest.Mocked<KiVerificationService>);

@@ -6,11 +6,24 @@
  */
 
 import { KiVerifierRegistry } from './registry';
-import { createEsqlValidSyntaxVerifier } from './verifiers';
+import {
+  createEsqlExecutesVerifier,
+  createEsqlValidSyntaxVerifier,
+  createIndexExistsVerifier,
+  createProvenancePresentVerifier,
+  createSchemaShapeVerifier,
+} from './verifiers';
 
-/** Creates a registry with all built-in KI verifiers registered. */
+/**
+ * Creates a registry with all built-in KI verifiers registered, cheapest first: shape and
+ * provenance are pure, the syntax check parses, the index and execution checks call the cluster.
+ */
 export const createKiVerifierRegistry = (): KiVerifierRegistry => {
   const registry = new KiVerifierRegistry();
+  registry.register(createSchemaShapeVerifier());
+  registry.register(createProvenancePresentVerifier());
   registry.register(createEsqlValidSyntaxVerifier());
+  registry.register(createIndexExistsVerifier());
+  registry.register(createEsqlExecutesVerifier());
   return registry;
 };

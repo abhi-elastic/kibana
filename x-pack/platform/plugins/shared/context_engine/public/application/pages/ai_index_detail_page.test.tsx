@@ -20,6 +20,7 @@ import { MemoryRouter, Route } from '@kbn/shared-ux-router';
 import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import type { GetAiIndexResponse } from '../../../common/http_api/ai_indices';
+import { sourcesValidatePath } from '../../../common/constants';
 import { CONTEXT_ENGINE_APP_ID } from '../../../common/features';
 import { CONTEXT_ENGINE_PATHS, getAiIndexDetailPath } from '../paths';
 import { CONTEXT_ENGINE_BACK_BUTTON_TEST_SUBJ } from '../layout/context_engine_page_header';
@@ -111,6 +112,10 @@ const createServices = () => {
   };
   services.application.getUrlForApp.mockImplementation(
     (appId, options) => `/app/${appId}${options?.path ?? ''}`
+  );
+  // ES|QL sources are validated server-side before the picker adds them.
+  (services.http.post as jest.Mock).mockImplementation((path: string) =>
+    Promise.resolve(path === sourcesValidatePath ? { valid: true } : undefined)
   );
   return services;
 };
@@ -313,6 +318,7 @@ describe('AiIndexDetailPage', () => {
     const editor = await screen.findByTestId('mockEsqlEditor');
     fireEvent.change(editor, { target: { value: 'FROM My view' } });
     fireEvent.click(screen.getByTestId('contextAddEsqlSourceButton'));
+    expect(await screen.findByTestId('contextSelectedSource-esql-0')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('contextEditSourcesDoneButton'));
 
     await waitFor(() => {

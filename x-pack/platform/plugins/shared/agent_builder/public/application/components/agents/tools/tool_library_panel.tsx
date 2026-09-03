@@ -43,6 +43,8 @@ interface ToolLibraryPanelProps {
   onToggleTool: (tool: ToolDefinition, isActive: boolean) => void;
   enableElasticCapabilities?: boolean;
   builtinToolIdSet?: Set<string>;
+  /** Tools contributed by the agent's type; always active, so not toggleable here. */
+  inheritedToolIdSet?: ReadonlySet<string>;
 }
 
 export const ToolLibraryPanel: React.FC<ToolLibraryPanelProps> = ({
@@ -52,11 +54,14 @@ export const ToolLibraryPanel: React.FC<ToolLibraryPanelProps> = ({
   onToggleTool,
   enableElasticCapabilities = false,
   builtinToolIdSet,
+  inheritedToolIdSet,
 }) => {
   const disabledItemIdSet = useMemo(() => {
-    if (!enableElasticCapabilities || !builtinToolIdSet) return undefined;
-    return builtinToolIdSet;
-  }, [enableElasticCapabilities, builtinToolIdSet]);
+    const autoIncluded = enableElasticCapabilities && builtinToolIdSet ? [...builtinToolIdSet] : [];
+    const inherited = inheritedToolIdSet ? [...inheritedToolIdSet] : [];
+    if (autoIncluded.length === 0 && inherited.length === 0) return undefined;
+    return new Set([...autoIncluded, ...inherited]);
+  }, [enableElasticCapabilities, builtinToolIdSet, inheritedToolIdSet]);
 
   const readOnlyItemIdSet = useMemo(
     () => new Set(allTools.filter((t) => t.readonly).map((t) => t.id)),

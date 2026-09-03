@@ -18,6 +18,7 @@ import { css } from '@emotion/react';
 import { defaultAgentToolIds } from '@kbn/agent-builder-common';
 import { useAgentBuilderAgentById } from '../../../hooks/agents/use_agent_by_id';
 import { useCanUpdateAgent } from '../../../hooks/agents/use_can_update_agent';
+import { useAgentTypeBase } from '../../../hooks/agents/use_agent_type_base';
 import { useSkillsService } from '../../../hooks/skills/use_skills';
 import { usePluginsService } from '../../../hooks/plugins/use_plugins';
 import { useToolsService } from '../../../hooks/tools/use_tools';
@@ -39,6 +40,7 @@ import {
   getActivePlugins,
   getActiveSkills,
   getActiveTools,
+  getInheritedToolIdSet,
 } from '../../../utils/tool_selection_utils';
 
 export const AgentOverview: React.FC = () => {
@@ -67,10 +69,25 @@ export const AgentOverview: React.FC = () => {
 
   const enableElasticCapabilities = agent?.configuration?.enable_elastic_capabilities ?? false;
 
+  const { typeBase } = useAgentTypeBase(agent?.id);
+  const inheritedSkillIdSet = useMemo(
+    () => new Set<string>(typeBase?.skillIds ?? []),
+    [typeBase?.skillIds]
+  );
+  const inheritedToolIdSet = useMemo(
+    () => getInheritedToolIdSet(allTools, typeBase?.tools ?? []),
+    [allTools, typeBase?.tools]
+  );
+
   const skillsCount = useMemo(
     () =>
-      getActiveSkills(allSkills, agent?.configuration?.skill_ids, enableElasticCapabilities).length,
-    [allSkills, agent?.configuration?.skill_ids, enableElasticCapabilities]
+      getActiveSkills(
+        allSkills,
+        agent?.configuration?.skill_ids,
+        enableElasticCapabilities,
+        inheritedSkillIdSet
+      ).length,
+    [allSkills, agent?.configuration?.skill_ids, enableElasticCapabilities, inheritedSkillIdSet]
   );
 
   const pluginsCount = useMemo(
@@ -88,9 +105,10 @@ export const AgentOverview: React.FC = () => {
       allTools,
       agent.configuration?.tools ?? [],
       enableElasticCapabilities,
-      defaultToolIdSet
+      defaultToolIdSet,
+      inheritedToolIdSet
     ).length;
-  }, [agent, allTools, enableElasticCapabilities, defaultToolIdSet]);
+  }, [agent, allTools, enableElasticCapabilities, defaultToolIdSet, inheritedToolIdSet]);
 
   const connectorsCount = agent?.configuration?.connector_ids?.length ?? 0;
 

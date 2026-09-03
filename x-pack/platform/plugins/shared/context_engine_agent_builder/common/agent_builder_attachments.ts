@@ -7,4 +7,7 @@
 
 export const AI_INDEX_ATTACHMENT_TYPE = 'platform.context_engine.ai_index' as const;
 
+/** One attachment per guided investigation, versioned through its stages. */
+export const INVESTIGATION_ATTACHMENT_TYPE = 'platform.context_engine.investigation' as const;
+
 export const WORKFLOW_YAML_ATTACHMENT_TYPE = 'workflow.yaml' as const;

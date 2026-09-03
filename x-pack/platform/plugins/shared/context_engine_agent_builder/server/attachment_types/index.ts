@@ -7,9 +7,15 @@
 
 import type { AgentBuilderPluginSetup } from '@kbn/agent-builder-server';
 import { createAiIndexAttachmentType } from './ai_index';
+import { createInvestigationAttachmentType } from './investigation';
+
+type RegisteredAttachmentType = Parameters<
+  AgentBuilderPluginSetup['attachments']['registerType']
+>[0];
 
 export const registerAttachmentTypes = (agentBuilder: AgentBuilderPluginSetup) => {
+  agentBuilder.attachments.registerType(createAiIndexAttachmentType() as RegisteredAttachmentType);
   agentBuilder.attachments.registerType(
-    createAiIndexAttachmentType() as Parameters<typeof agentBuilder.attachments.registerType>[0]
+    createInvestigationAttachmentType() as RegisteredAttachmentType
   );
 };

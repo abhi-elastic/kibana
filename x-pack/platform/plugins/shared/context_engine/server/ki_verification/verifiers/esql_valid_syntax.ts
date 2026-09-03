@@ -25,14 +25,28 @@ export const MAX_ESQL_QUERY_LENGTH = MAX_KI_ATTRIBUTE_VALUE_LENGTH;
 
 const REASON_QUERY_PREVIEW_LENGTH = 200;
 
-const getEsqlValue = (ki: KnowledgeIndicator): unknown => ki.attributes?.[ESQL_ATTRIBUTE_KEY];
+export const getEsqlValue = (ki: KnowledgeIndicator): unknown =>
+  ki.attributes?.[ESQL_ATTRIBUTE_KEY];
+
+/** The trimmed, well-formed queries of `attributes.esql`, or `undefined` when the field is malformed. */
+export const getEsqlQueries = (ki: KnowledgeIndicator): string[] | undefined => {
+  const value = getEsqlValue(ki);
+  const candidates = typeof value === 'string' ? [value] : Array.isArray(value) ? value : null;
+  if (!candidates || candidates.length === 0 || candidates.length > MAX_ESQL_QUERIES) {
+    return undefined;
+  }
+  if (!candidates.every((entry) => typeof entry === 'string' && entry.trim().length > 0)) {
+    return undefined;
+  }
+  return candidates.map((query) => query.trim());
+};
 
 const formatValidationError = (error: ESQLMessage | EditorError): string =>
   'text' in error
     ? `${error.text} (at position ${error.location.min}-${error.location.max})`
     : `${error.message} (at line ${error.startLineNumber}:${error.startColumn})`;
 
-const previewQuery = (query: string): string =>
+export const previewQuery = (query: string): string =>
   query.length > REASON_QUERY_PREVIEW_LENGTH
     ? `${query.slice(0, REASON_QUERY_PREVIEW_LENGTH)}…`
     : query;

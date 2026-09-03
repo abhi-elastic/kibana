@@ -8,5 +8,7 @@
 export { AutomationRow } from './automation_row';
 export { AutomationsPanel } from './automations_panel';
 export { DescriptionPanel } from './description_panel';
+export { InvestigationScopePanel } from './investigation_scope';
 export { SignalsPanel } from './signals_panel';
 export { SourcesPanel } from './sources_panel';
+export { StorageTypePanel } from './storage_type_panel';

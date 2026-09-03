@@ -46,6 +46,8 @@ interface AutomationsPanelProps {
   aiIndex: GetAiIndexResponse | undefined;
   onSaved: () => void;
   isManaged: boolean;
+  /** Set when the guided investigation hand-off replaces the standalone suggest button. */
+  hideSuggestAutomation?: boolean;
 }
 
 export const AutomationsPanel = ({
@@ -53,6 +55,7 @@ export const AutomationsPanel = ({
   aiIndex,
   onSaved,
   isManaged,
+  hideSuggestAutomation = false,
 }: AutomationsPanelProps) => {
   const {
     services: { application },
@@ -130,7 +133,7 @@ export const AutomationsPanel = ({
             </EuiFlexGroup>
           ) : !isManaged && !isLoading ? (
             <EuiFlexGroup gutterSize="s" responsive={false}>
-              {canSuggest && (
+              {canSuggest && !hideSuggestAutomation && (
                 <EuiFlexItem grow={false}>
                   <AiButton
                     size="s"

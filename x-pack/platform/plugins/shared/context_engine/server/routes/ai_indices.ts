@@ -27,9 +27,13 @@ import {
   MAX_FEEDBACK_ANALYSIS_INTERVAL_LENGTH,
   MAX_FEEDBACK_ANALYSIS_SIGNAL_FILTER_LENGTH,
   MAX_FEEDBACK_ANALYSIS_TIME_RANGE_FROM_LENGTH,
+  MAX_INVESTIGATION_TIME_RANGE_LENGTH,
+  MAX_INVESTIGATION_TRACE_AGENT_ID_LENGTH,
+  MAX_INVESTIGATION_TRACE_ESQL_LENGTH,
   MIN_FEEDBACK_ANALYSIS_INTERVAL_MINUTES,
   aiIndexByIdPath,
   aiIndexFeedbackAnalysisPath,
+  aiIndexInvestigationScopePath,
   aiIndexKiByIdPath,
   aiIndexKiListPath,
   aiIndexPath,
@@ -44,6 +48,7 @@ import type {
   GetAiIndexResponse,
   ListAiIndexResponse,
   PutAiIndexFeedbackAnalysisResponse,
+  PutAiIndexInvestigationScopeResponse,
   PutAiIndexResponse,
 } from '../../common/http_api/ai_indices';
 import type { ImprovementAction } from '../../common/http_api/improvement_actions';
@@ -55,6 +60,7 @@ import {
   validateAbsoluteSignalWindow,
   validateAiIndexId,
   validateFeedbackAnalysisInterval,
+  validateInvestigationTimeBoundary,
   validateRelativeSignalWindow,
   validateSignalWindowCoversInterval,
 } from '../../common/validation';
@@ -65,14 +71,17 @@ import {
   AiIndexNotFoundError,
   AiIndexAlreadyExistsError,
   InvalidConnectorSourceError,
+  InvalidEsqlSourceError,
   KiNotFoundError,
 } from '../ai_indices/errors';
 import type { AiIndexService } from '../ai_indices/service';
+import type { FindingsServiceApi } from '../findings/service';
 import type { ImprovementsServiceApi } from '../improvements/service';
 import { getKi } from '../ai_indices/ki_get';
 import { getKis } from '../ai_indices/ki_list';
 import { validateSignalFilter } from '../ai_indices/signal_filter';
 import { validateConnectorSources } from '../ai_indices/validate_connector_sources';
+import { assertValidEsqlSources } from '../sources/validate_esql_source';
 import { AiIndexAuditAction, aiIndexAuditEvent } from './audit_events';
 import { withContextEngineFeatureFlag } from './with_feature_flag';
 
@@ -181,6 +190,62 @@ const feedbackAnalysisSchema = schema.object(
       validateSignalWindowCoversInterval(schedule.interval, signalTimeRange),
   }
 );
+
+const investigationTraceScopeSchema = schema.object(
+  {
+    agent_id: schema.maybe(
+      schema.string({
+        minLength: 1,
+        maxLength: MAX_INVESTIGATION_TRACE_AGENT_ID_LENGTH,
+        meta: {
+          description: 'Raw `attributes.gen_ai.agent.id` of the agent whose traces to inspect.',
+        },
+      })
+    ),
+    time_range: schema.object({
+      from: schema.string({
+        maxLength: MAX_INVESTIGATION_TIME_RANGE_LENGTH,
+        validate: validateInvestigationTimeBoundary,
+        meta: { description: 'Start of the trace window, date math or ISO 8601.' },
+      }),
+      to: schema.string({
+        maxLength: MAX_INVESTIGATION_TIME_RANGE_LENGTH,
+        validate: validateInvestigationTimeBoundary,
+        meta: { description: 'End of the trace window, date math or ISO 8601.' },
+      }),
+    }),
+    esql: schema.maybe(
+      schema.string({
+        minLength: 1,
+        maxLength: MAX_INVESTIGATION_TRACE_ESQL_LENGTH,
+        meta: {
+          description:
+            'Custom ES|QL selecting the traces to inspect. Replaces the agent filter when set.',
+        },
+      })
+    ),
+  },
+  {
+    meta: {
+      description:
+        'May be incomplete: the page saves the scope as the user edits it, and the run gate ' +
+        'requires an agent id or a custom ES|QL before an investigation starts.',
+    },
+  }
+);
+
+/**
+ * The stored scope is a draft (mode alone, or a time range without an agent is fine). Whether it
+ * is complete enough to investigate is decided when the user runs, not when the page saves.
+ */
+const investigationScopeSchema = schema.object({
+  mode: schema.oneOf(
+    [schema.literal('sources'), schema.literal('traces'), schema.literal('both')],
+    { meta: { description: 'What the guided investigation may inspect.' } }
+  ),
+  trace: schema.maybe(investigationTraceScopeSchema),
+});
+
 const kiIdParamsSchema = schema.object({
   aiIndexId: aiIndexIdSchema,
   kiId: schema.string({
@@ -198,6 +263,7 @@ const aiIndexPropertiesSchema = {
     })
   ),
   feedback_analysis: schema.maybe(feedbackAnalysisSchema),
+  investigation_scope: schema.maybe(investigationScopeSchema),
   dest: schema.object({
     type: schema.oneOf([schema.literal('data_stream'), schema.literal('index')], {
       meta: {
@@ -277,7 +343,11 @@ const getKiQuerySchema = schema.object({
 });
 
 const handleAiIndexError = (error: unknown, response: KibanaResponseFactory) => {
-  if (error instanceof InvalidAiIndexDestError || error instanceof InvalidConnectorSourceError) {
+  if (
+    error instanceof InvalidAiIndexDestError ||
+    error instanceof InvalidConnectorSourceError ||
+    error instanceof InvalidEsqlSourceError
+  ) {
     return response.badRequest({ body: { message: error.message } });
   }
   if (error instanceof AiIndexNotFoundError || error instanceof KiNotFoundError) {
@@ -298,12 +368,14 @@ export const registerAiIndexRoutes = ({
   logger,
   getAiIndexService,
   getImprovementsService,
+  getFindingsService,
   getActions,
 }: {
   router: IRouter;
   logger: Logger;
   getAiIndexService: () => AiIndexService;
   getImprovementsService: (esClient: ElasticsearchClient) => ImprovementsServiceApi;
+  getFindingsService: (esClient: ElasticsearchClient) => FindingsServiceApi;
   getActions: () => Promise<ActionsPluginStart>;
 }) => {
   // Create an AI index
@@ -330,7 +402,8 @@ export const registerAiIndexRoutes = ({
         },
       },
       withContextEngineFeatureFlag(async (ctx, request, response) => {
-        const auditLogger = (await ctx.core).security.audit.logger;
+        const core = await ctx.core;
+        const auditLogger = core.security.audit.logger;
         const { id, ...properties } = request.body;
         try {
           await validateConnectorSources({
@@ -338,6 +411,7 @@ export const registerAiIndexRoutes = ({
             actions: await getActions(),
             request,
           });
+          await assertValidEsqlSources(core.elasticsearch.client.asCurrentUser, properties.sources);
           await getAiIndexService().create(id, properties);
           auditLogger.log(aiIndexAuditEvent({ action: AiIndexAuditAction.CREATE, id }));
           const body: CreateAiIndexResponse = { status: 'created' };
@@ -374,7 +448,8 @@ export const registerAiIndexRoutes = ({
         },
       },
       withContextEngineFeatureFlag(async (ctx, request, response) => {
-        const auditLogger = (await ctx.core).security.audit.logger;
+        const core = await ctx.core;
+        const auditLogger = core.security.audit.logger;
         const { aiIndexId } = request.params;
         try {
           await validateConnectorSources({
@@ -382,6 +457,10 @@ export const registerAiIndexRoutes = ({
             actions: await getActions(),
             request,
           });
+          await assertValidEsqlSources(
+            core.elasticsearch.client.asCurrentUser,
+            request.body.sources
+          );
           const status = await getAiIndexService().put(aiIndexId, request.body);
           const putAction =
             status === 'created' ? AiIndexAuditAction.CREATE : AiIndexAuditAction.UPDATE;
@@ -594,6 +673,48 @@ export const registerAiIndexRoutes = ({
       })
     );
 
+  // Update the guided investigation scope of an AI index
+  router.versioned
+    .put({
+      path: aiIndexInvestigationScopePath,
+      security: WRITE_SECURITY,
+      access: 'internal',
+      summary: 'Update AI index investigation scope',
+      description:
+        'Replaces the guided investigation scope of an AI index without touching the rest of the entry. Permitted on managed AI indices.',
+    })
+    .addVersion(
+      {
+        version: AI_INDEX_INTERNAL_API_VERSION,
+        validate: {
+          request: {
+            params: aiIndexIdParamsSchema,
+            body: investigationScopeSchema,
+          },
+        },
+      },
+      withContextEngineFeatureFlag(async (ctx, request, response) => {
+        const auditLogger = (await ctx.core).security.audit.logger;
+        const { aiIndexId } = request.params;
+        try {
+          const investigationScope = await getAiIndexService().setInvestigationScope(
+            aiIndexId,
+            request.body
+          );
+          auditLogger.log(aiIndexAuditEvent({ action: AiIndexAuditAction.UPDATE, id: aiIndexId }));
+          const body: PutAiIndexInvestigationScopeResponse = {
+            investigation_scope: investigationScope,
+          };
+          return response.ok({ body });
+        } catch (error) {
+          auditLogger.log(
+            aiIndexAuditEvent({ action: AiIndexAuditAction.UPDATE, id: aiIndexId, error })
+          );
+          return handleAiIndexError(error, response);
+        }
+      })
+    );
+
   // Delete an AI index
   router.versioned
     .delete({
@@ -637,6 +758,16 @@ export const registerAiIndexRoutes = ({
             .catch((error) => {
               logger.warn(
                 `Deleted AI index '${aiIndexId}', but failed to clear its improvements: ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              );
+            });
+          // Same reasoning for the findings store: keyed by AI index id, best-effort cleanup.
+          await getFindingsService(core.elasticsearch.client.asCurrentUser)
+            .deleteByAiIndex(aiIndexId)
+            .catch((error) => {
+              logger.warn(
+                `Deleted AI index '${aiIndexId}', but failed to clear its findings: ${
                   error instanceof Error ? error.message : String(error)
                 }`
               );

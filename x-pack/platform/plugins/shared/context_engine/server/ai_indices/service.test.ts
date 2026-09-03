@@ -18,6 +18,7 @@ import {
   AiIndexAlreadyExistsError,
 } from './errors';
 import { MAX_AI_INDEX_AUTOMATIONS } from '../../common/constants';
+import type { AiIndexInvestigationScope } from '../../common/http_api/ai_indices';
 import type { AiIndexDocument, AiIndexStorageClient } from './storage';
 import { createAiIndexStorageClient } from './storage';
 
@@ -616,6 +617,71 @@ describe('AiIndexService', () => {
       await expect(
         service.setFeedbackAnalysis('customer_support', feedbackAnalysis)
       ).rejects.toBeInstanceOf(AiIndexConflictError);
+    });
+  });
+
+  describe('setInvestigationScope', () => {
+    const investigationScope: AiIndexInvestigationScope = {
+      mode: 'both',
+      trace: { agent_id: 'support-agent', time_range: { from: 'now-7d', to: 'now' } },
+    };
+
+    const mockStored = (document: AiIndexDocument) => {
+      storageClient.get.mockResolvedValue({
+        _id: 'customer_support',
+        _index: '.contextengine-ai-indices',
+        found: true,
+        _seq_no: 7,
+        _primary_term: 2,
+        _source: document,
+      });
+    };
+
+    it('writes the block, keeps the rest of the entry, and guards with OCC', async () => {
+      mockStored({ ...aiIndexDocument, managed: true });
+
+      await expect(
+        service.setInvestigationScope('customer_support', investigationScope)
+      ).resolves.toEqual(investigationScope);
+
+      const [indexArgs] = storageClient.index.mock.calls[0];
+      expect(indexArgs.document).toEqual(
+        expect.objectContaining({
+          investigation_scope: investigationScope,
+          managed: true,
+          sources: aiIndexDocument.sources,
+          date_created: aiIndexDocument.date_created,
+        })
+      );
+      expect(indexArgs.if_seq_no).toBe(7);
+      expect(indexArgs.if_primary_term).toBe(2);
+      expect(esClient.indices.resolveIndex).not.toHaveBeenCalled();
+    });
+
+    it('replaces the previous block rather than merging into it', async () => {
+      mockStored({ ...aiIndexDocument, investigation_scope: investigationScope });
+
+      await service.setInvestigationScope('customer_support', { mode: 'sources' });
+
+      const [indexArgs] = storageClient.index.mock.calls[0];
+      expect(indexArgs.document?.investigation_scope).toEqual({ mode: 'sources' });
+    });
+
+    it('throws AiIndexNotFoundError when the AI index does not exist', async () => {
+      storageClient.get.mockRejectedValue(createNotFoundError());
+
+      await expect(
+        service.setInvestigationScope('missing', investigationScope)
+      ).rejects.toBeInstanceOf(AiIndexNotFoundError);
+      expect(storageClient.index).not.toHaveBeenCalled();
+    });
+
+    it('round-trips investigation_scope through get', async () => {
+      mockStored({ ...aiIndexDocument, investigation_scope: investigationScope });
+
+      await expect(service.get('customer_support')).resolves.toMatchObject({
+        investigation_scope: investigationScope,
+      });
     });
   });
 

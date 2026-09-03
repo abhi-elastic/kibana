@@ -12,6 +12,7 @@ export const aiIndexPath = `${publicApiPath}/ai_index`;
 export const aiIndexByIdPath = `${aiIndexPath}/{aiIndexId}`;
 export const aiIndexKiSummaryPath = `${internalApiPath}/ai_index/{aiIndexId}/ki_summary`;
 export const aiIndexFeedbackAnalysisPath = `${internalApiPath}/ai_index/{aiIndexId}/feedback_analysis`;
+export const aiIndexInvestigationScopePath = `${internalApiPath}/ai_index/{aiIndexId}/investigation_scope`;
 export const aiIndexKiListPath = `${internalApiPath}/ai_index/{aiIndexId}/kis`;
 export const aiIndexKiByIdPath = `${aiIndexKiListPath}/{kiId}`;
 
@@ -22,6 +23,21 @@ export const MAX_KI_PAGE_SIZE = 100;
 export const KI_SUMMARY_PAGE_SIZE = 0;
 
 export const MAX_KI_TYPE_FILTER_LENGTH = 256;
+
+/** Investigation scope helpers (internal): ES|QL source validation/preview and trace scope lookups. */
+export const sourcesValidatePath = `${internalApiPath}/sources/_validate`;
+export const sourcesPreviewPath = `${internalApiPath}/sources/_preview`;
+export const traceAgentsPath = `${internalApiPath}/traces/_agents`;
+export const traceScopePreviewPath = `${internalApiPath}/traces/_scope_preview`;
+
+/** Rows returned per ES|QL source by the preview route. */
+export const SOURCE_PREVIEW_SAMPLE_SIZE = 5;
+/** `terminate_after` for the preview document count; larger corpora report the cap. */
+export const SOURCE_PREVIEW_COUNT_CAP = 100000;
+/** Maximum distinct agent ids returned by the trace agent picker. */
+export const MAX_TRACE_AGENTS = 200;
+/** Conversations carried into the second step of the trace scope preview. */
+export const MAX_TRACE_SCOPE_CONVERSATIONS = 1000;
 
 /** Read-only Signals routes (internal): a preaggregated grouped list and a per-group fetch. */
 export const signalGroupsPath = `${internalApiPath}/signals/groups`;
@@ -101,6 +117,35 @@ export const DEFAULT_FEEDBACK_ANALYSIS_SIGNAL_TIME_RANGE_FROM = 'now-30d';
 /** Advanced setting that gates the Context Engine feedback loop. */
 export const CONTEXT_ENGINE_FEEDBACK_LOOP_ENABLED_SETTING_ID = 'contextEngine:feedbackLoopEnabled';
 
+/** Advanced setting that gates the guided investigation flow on the AI index Overview page. */
+export const CONTEXT_ENGINE_GUIDED_INVESTIGATION_ENABLED_SETTING_ID =
+  'contextEngine:guidedInvestigationEnabled';
+
+/** Bounds for the persisted investigation scope. */
+export const MAX_INVESTIGATION_TRACE_AGENT_ID_LENGTH = 256;
+export const MAX_INVESTIGATION_TIME_RANGE_LENGTH = 64;
+export const MAX_INVESTIGATION_TRACE_ESQL_LENGTH = 10240;
+
+/** Findings store routes (internal): investigations per AI index and their findings. */
+export const aiIndexInvestigationsPath = `${internalApiPath}/ai_index/{aiIndexId}/investigations`;
+export const aiIndexLatestInvestigationPath = `${aiIndexInvestigationsPath}/_latest`;
+export const aiIndexFindingsPath = `${internalApiPath}/ai_index/{aiIndexId}/findings`;
+export const investigationByIdPath = `${internalApiPath}/investigations/{investigationId}`;
+
+/** Bounds for the findings store. */
+export const MAX_FINDINGS_PER_INVESTIGATION = 50;
+export const DEFAULT_FINDINGS_PAGE_SIZE = 50;
+export const MAX_FINDINGS_PAGE_SIZE = 200;
+export const MAX_INVESTIGATIONS_PAGE_SIZE = 20;
+export const MAX_FINDING_TEXT_LENGTH = 2048;
+export const MAX_FINDING_SUBJECT_LENGTH = 512;
+export const MAX_FINDING_ESQL_LENGTH = 10240;
+export const MAX_FINDING_SAMPLE_TRACE_IDS = 20;
+export const MAX_INVESTIGATION_PROBES = 5;
+export const MAX_INVESTIGATION_MEASUREMENTS = 200;
+export const MAX_STRATEGY_FAMILIES = 10;
+export const MAX_PLAN_ITEMS = 30;
+
 /** Task Manager type, id, and schedule for the global signal-generation task. */
 export const SIGNAL_GENERATOR_TASK_TYPE = 'contextEngine:signalGenerator';
 export const SIGNAL_GENERATOR_TASK_ID = 'contextengine-signal-generator';
@@ -108,6 +153,20 @@ export const SIGNAL_GENERATOR_SCHEDULE_INTERVAL = '1h';
 
 /** Agent id whose tool calls are left untagged. */
 export const MANAGEMENT_AGENT_ID = 'platform.context_engine.agent';
+
+/**
+ * Managed AI index that receives the second copy of every KI created from a
+ * `create_ki_and_signal` decision. Distinct from the per-space tool-call signals storage.
+ */
+export const SIGNAL_KIS_AI_INDEX_ID = 'context-engine-signal-kis';
+export const SIGNAL_KIS_AI_INDEX_DEST = `ai-index-idx-${SIGNAL_KIS_AI_INDEX_ID}`;
+export const SIGNAL_KIS_AI_INDEX_DESCRIPTION =
+  'Recurring failure patterns surfaced from agent traces. Each KI here is also written to the AI index it was created for.';
+
+/** Tags every signal-marked KI carries so both copies can be traced back to the decision. */
+export const SIGNAL_KI_TAG = 'signal';
+export const findingTag = (findingId: string): string => `finding:${findingId}`;
+export const planTag = (planItemId: string): string => `plan:${planItemId}`;
 
 /**
  * Prefix for the per-space Agent Builder OTel traces indices (one per Kibana space). Kept

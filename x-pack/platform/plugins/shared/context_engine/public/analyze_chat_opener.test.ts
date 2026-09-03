@@ -114,7 +114,7 @@ describe('createAnalyzeChatOpener', () => {
     expect(coreStart.notifications.toasts.addWarning).toHaveBeenCalledTimes(1);
   });
 
-  it('does not open a chat when the index has no configured feedback agent', async () => {
+  it('does not open a chat when the index has no configured feedback agent and no shared agent', async () => {
     const agentBuilder = mockAgentBuilder();
     const opener = createAnalyzeChatOpener({
       coreStart: coreWithCapability(true),
@@ -125,5 +125,26 @@ describe('createAnalyzeChatOpener', () => {
     await opener!(context(undefined));
 
     expect(agentBuilder.openChat).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the shared Context Engine agent when no feedback agent is configured', async () => {
+    const agentBuilder = mockAgentBuilder();
+    const ensureAgentId = jest.fn(async () => 'platform.context_engine.agent');
+    const opener = createAnalyzeChatOpener({
+      coreStart: coreWithCapability(true),
+      agentBuilder,
+      buildAnalyzeChat: analyzeOptions,
+      getAgentBuilderIntegration: () => ({
+        suggestAutomation: {} as never,
+        ensureAgentId,
+      }),
+    });
+
+    await opener!(context(undefined));
+
+    expect(ensureAgentId).toHaveBeenCalledTimes(1);
+    expect(agentBuilder.openChat).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'platform.context_engine.agent' })
+    );
   });
 });

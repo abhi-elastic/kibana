@@ -7,7 +7,11 @@
 
 import { coreMock, loggingSystemMock } from '@kbn/core/server/mocks';
 import { createVerifyKiStepDefinition } from './verify_ki_step';
-import { ESQL_VALID_SYNTAX_VERIFIER_ID } from '../ki_verification';
+import {
+  ESQL_EXECUTES_VERIFIER_ID,
+  ESQL_VALID_SYNTAX_VERIFIER_ID,
+  SCHEMA_SHAPE_VERIFIER_ID,
+} from '../ki_verification';
 import { mockKiStepTelemetry } from './test_utils';
 
 type VerifyKiHandler = ReturnType<typeof createVerifyKiStepDefinition>['handler'];
@@ -15,12 +19,13 @@ type VerifyKiHandlerContext = Parameters<VerifyKiHandler>[0];
 
 const makeHandlerContext = (
   ki: VerifyKiHandlerContext['input']['ki'],
-  getScopedEsClient: () => unknown = jest.fn()
+  getScopedEsClient: () => unknown = jest.fn(),
+  executeEsql?: boolean
 ): VerifyKiHandlerContext =>
   ({
-    input: { ki },
+    input: { ki, execute_esql: executeEsql },
     config: {},
-    rawInput: { ki },
+    rawInput: { ki, execute_esql: executeEsql },
     contextManager: { getFakeRequest: jest.fn(), getScopedEsClient },
     logger: loggingSystemMock.createLogger(),
     abortSignal: new AbortController().signal,
@@ -64,22 +69,29 @@ describe('verify_ki workflow step', () => {
 
     const output = await runHandler({
       type: 'detection',
+      title: 'Failed logins',
       attributes: { esql: 'FROM logs-* | WHERE event.outcome == "failure" | LIMIT 10' },
     });
 
     expect(output.passed).toBe(true);
-    expect(output.results).toEqual([{ verifier: ESQL_VALID_SYNTAX_VERIFIER_ID, passed: true }]);
+    expect(output.results).toEqual([
+      { verifier: SCHEMA_SHAPE_VERIFIER_ID, passed: true },
+      { verifier: ESQL_VALID_SYNTAX_VERIFIER_ID, passed: true },
+    ]);
   });
 
   it('fails a KI with invalid ES|QL and reports the reason', async () => {
     setContextEngineEnabled(true);
 
     const output = await runHandler({
+      type: 'detection',
+      title: 'Broken',
       attributes: { esql: 'FROM logs-* | EVAL x = NOT_A_FUNCTION(1)' },
     });
 
     expect(output.passed).toBe(false);
     expect(output.results).toEqual([
+      { verifier: SCHEMA_SHAPE_VERIFIER_ID, passed: true },
       {
         verifier: ESQL_VALID_SYNTAX_VERIFIER_ID,
         passed: false,
@@ -88,12 +100,53 @@ describe('verify_ki workflow step', () => {
     ]);
   });
 
-  it('skips KIs with no applicable verifiers', async () => {
+  it('runs only the shape check when no other verifier applies', async () => {
     setContextEngineEnabled(true);
 
-    const output = await runHandler({ title: 'no esql here' });
+    const output = await runHandler({ type: 'index_metadata', title: 'no esql here' });
 
-    expect(output).toEqual({ passed: true, results: [] });
+    expect(output).toEqual({
+      passed: true,
+      results: [{ verifier: SCHEMA_SHAPE_VERIFIER_ID, passed: true }],
+    });
+  });
+
+  it('fails a partial KI that lacks the required fields', async () => {
+    setContextEngineEnabled(true);
+
+    const output = await runHandler({ title: 'no type' });
+
+    expect(output.passed).toBe(false);
+    expect(output.results).toEqual([
+      {
+        verifier: SCHEMA_SHAPE_VERIFIER_ID,
+        passed: false,
+        reason: expect.stringContaining('type is required'),
+      },
+    ]);
+  });
+
+  it('runs the execution check only when execute_esql is set', async () => {
+    setContextEngineEnabled(true);
+    const esClient = { esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) } };
+    const ki = { type: 'detection', title: 'Failed logins', attributes: { esql: 'FROM logs-*' } };
+
+    const { output: withoutFlag } = await makeDefinition().handler(
+      makeHandlerContext(ki, () => esClient)
+    );
+    expect(withoutFlag?.results.map(({ verifier }) => verifier)).not.toContain(
+      ESQL_EXECUTES_VERIFIER_ID
+    );
+    expect(esClient.esql.query).not.toHaveBeenCalled();
+
+    const { output: withFlag } = await makeDefinition().handler(
+      makeHandlerContext(ki, () => esClient, true)
+    );
+    expect(withFlag?.results).toContainEqual({ verifier: ESQL_EXECUTES_VERIFIER_ID, passed: true });
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      { query: 'FROM logs-* | LIMIT 0', format: 'json' },
+      expect.anything()
+    );
   });
 
   it('throws when the Context Engine setting is off', async () => {
@@ -104,10 +157,57 @@ describe('verify_ki workflow step', () => {
     ).rejects.toThrow('Context Engine is disabled');
   });
 
+  describe('input shape repair', () => {
+    const asKi = (value: unknown) => value as VerifyKiHandlerContext['input']['ki'];
+
+    it('parses a KI that arrived as a JSON string (rendered with `| json`)', async () => {
+      setContextEngineEnabled(true);
+
+      const output = await runHandler(
+        asKi(JSON.stringify({ type: 'index_profile', title: 'Burst' }))
+      );
+
+      expect(output.passed).toBe(true);
+      expect(output.results).toEqual([{ verifier: SCHEMA_SHAPE_VERIFIER_ID, passed: true }]);
+    });
+
+    it('fails with the typed-expression hint when ki is a non-JSON string', async () => {
+      setContextEngineEnabled(true);
+
+      await expect(runHandler(asKi('[object Object]'))).rejects.toThrow(
+        /`ki` arrived as a string .*\$\{\{ steps\.build_ki\.output\.ki \}\}/
+      );
+    });
+
+    it('fails with a scope hint when ki is undefined', async () => {
+      setContextEngineEnabled(true);
+
+      await expect(runHandler(asKi(undefined))).rejects.toThrow(
+        /`ki` is undefined.*data\.set.*variables\.<key>/
+      );
+    });
+
+    it('treats execute_esql rendered as the string "true" as true', async () => {
+      setContextEngineEnabled(true);
+      const esClient = {
+        esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
+      };
+      const ki = { type: 'detection', title: 'Failed logins', attributes: { esql: 'FROM logs-*' } };
+
+      const { output } = await makeDefinition().handler(
+        makeHandlerContext(ki, () => esClient, 'true' as unknown as boolean)
+      );
+
+      expect(output?.results).toContainEqual({ verifier: ESQL_EXECUTES_VERIFIER_ID, passed: true });
+    });
+  });
+
   it('reports a passed verification', async () => {
     setContextEngineEnabled(true);
 
     await runHandler({
+      type: 'detection',
+      title: 'Failed logins',
       attributes: { esql: 'FROM logs-* | WHERE event.outcome == "failure" | LIMIT 10' },
     });
 
@@ -115,25 +215,29 @@ describe('verify_ki workflow step', () => {
     expect(telemetry.analyticsService.reportKiVerification).toHaveBeenCalledWith({
       outcome: 'success',
       passed: true,
-      verifiersRun: 1,
+      verifiersRun: 2,
       failedVerifierIds: [],
     });
     expect(telemetry.logger.debug).toHaveBeenCalledTimes(1);
     expect(telemetry.logger.debug).toHaveBeenCalledWith(
-      'KI verification passed (verifiers run: 1)'
+      'KI verification passed (verifiers run: 2)'
     );
   });
 
   it('reports failed verifier ids on failure', async () => {
     setContextEngineEnabled(true);
 
-    await runHandler({ attributes: { esql: 'FROM logs-* | EVAL x = NOT_A_FUNCTION(1)' } });
+    await runHandler({
+      type: 'detection',
+      title: 'Broken',
+      attributes: { esql: 'FROM logs-* | EVAL x = NOT_A_FUNCTION(1)' },
+    });
 
     expect(telemetry.analyticsService.reportKiVerification).toHaveBeenCalledTimes(1);
     expect(telemetry.analyticsService.reportKiVerification).toHaveBeenCalledWith({
       outcome: 'success',
       passed: false,
-      verifiersRun: 1,
+      verifiersRun: 2,
       failedVerifierIds: [ESQL_VALID_SYNTAX_VERIFIER_ID],
     });
   });
@@ -149,15 +253,15 @@ describe('verify_ki workflow step', () => {
     expect(message).not.toContain('NOT_A_FUNCTION');
   });
 
-  it('reports a zero verifier count when no verifier applied', async () => {
+  it('reports the shape check alone when no other verifier applied', async () => {
     setContextEngineEnabled(true);
 
-    await runHandler({ title: 'no esql here' });
+    await runHandler({ type: 'index_metadata', title: 'no esql here' });
 
     expect(telemetry.analyticsService.reportKiVerification).toHaveBeenCalledWith({
       outcome: 'success',
       passed: true,
-      verifiersRun: 0,
+      verifiersRun: 1,
       failedVerifierIds: [],
     });
   });

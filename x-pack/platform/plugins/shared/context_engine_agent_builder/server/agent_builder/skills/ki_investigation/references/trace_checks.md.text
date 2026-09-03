@@ -1,0 +1,85 @@
+# Trace checks: reading the `ki-investigation.trace_checks` output
+
+One call runs the whole catalog. You never write the queries; you read the rows.
+
+## Top-level fields
+
+- `sample`: `total_requests` in scope, `sampled_requests` analysed, `sampling_fraction`,
+  `distinct_conversations`, `band` (`insufficient` < 10, `limited` 10-29, `full` >= 30). When the
+  fraction is below 1, say "about k in range" for absolute counts; explicit errors in the sample are
+  still observed facts, not estimates.
+- `privacy`: `tool_details`, `llm_responses`, `user_prompts`. False means the content is absent
+  from the traces (setting off), so the dependent checks are `skipped`, not "clean".
+- `baselines.request`: `n`, `med`, `mad`, `pN`, `mean`, `sd`, `threshold`, `rule`, `mean_plus_2sd`
+  (reference only). `baselines.tools[]`: the same per top tool. Threshold is
+  `max(pN, med + k * mad, med + 2)`; the percentile term only applies in the `full` band.
+- `checks[]`: one row per check id, in catalog order, with `status`, `threshold`, `counts`,
+  `signatures[]`, `note`.
+- `signatures[]`: `signature`, `kind`, `prevalence` (`affected_requests`, `sampled_requests`,
+  `affected_fraction`, `distinct_conversations`), `counted_over` (`sample` or `detail_set`),
+  `ki_eligible` (gate already applied), `confidence_cap`, `sample_trace_ids`, `details`.
+- `outliers[]`: T3/T4 requests above threshold with `calls`, `baseline`, `threshold`,
+  `cohort_trace_ids`, `cohort_rule`.
+- `detail[]`: per request in the bounded set, `role`, ordered `steps[]` (`tool`, `digest` with
+  targets and filter fields, `status`, `status_message`, `partial_error`, `empty_result`,
+  `result_chars`, `duration_seconds`), `first_user_message`, `final_assistant_message`,
+  `finish_reason`, `soft_failure`.
+- `coverage`: `ran`, `fired`, `not_fired`, `skipped`, `insufficient` for the closing statement.
+
+## Statuses
+
+`fired` crossed the gate; `not_fired` ran and stayed under it; `skipped` could not run (reason in
+`note`); `insufficient` needs more requests; `provided` is protocol input or a positive signal.
+
+## The catalog
+
+| id | kind | fires when | cap | KI it points at |
+|---|---|---|---|---|
+| T1 | `tool_error` | same tool + error class in 2+ requests or 3+ spans | Confirmed | constraint or recovery |
+| T2 | `partial_tool_error` | result carries `{"type":"error"}` while span is Ok, 2+ requests (needs tool details) | Confirmed | constraint or recovery |
+| T3 | `loop` (heavy request) | tool calls above the request threshold | Suggestive until T11 | none by itself |
+| T4 | `loop` / `discovery_loop` | one top tool above its tool threshold and >= 2 | Strong, T11 decides | index metadata, constraint |
+| T5 | `empty_retrieval` | zero-row retrieval then a final answer (needs tool details) | Strong | route or field fact |
+| T6 | `soft_failure` | final message admits non-completion (needs LLM responses) | Strong with 2+ requests and a cohort success, else Suggestive | task recipe, route |
+| T7 | `timeout_or_latency` | one span over 50% of the request | Suggestive | unlikely when model-dominated |
+| T8 | `token_runaway` | input tokens grow 3x within a request, or total above cohort p99 | Suggestive | unlikely |
+| T9 | `system_error` | chat span with status Error | Confirmed | never (routing only) |
+| T10 | `unsupported_operation` | T1 message matches a known ES|QL / tool limitation | Confirmed | constraint plus recovery |
+| T11 | protocol | always `provided` | - | - |
+| T12 | positive | recurring task shapes, `note` holds the JSON | - | feeds strategy and probes |
+| T13 | positive | most touched indices, `note` holds the JSON | - | orders the measurements |
+
+## T11 comparison protocol (per signature, at most 3 exemplars)
+
+Intra-request: walk the outlier's `steps` and label each repeat of the same tool by comparing
+digests: `same_target_params_vary` (same targets, different filters, no error between),
+`retry_after_error` (an Error or `empty_result` precedes the repeat), `new_target` (different
+targets or a different question).
+
+Inter-request: pick cohort requests from `detail` (role `cohort`, ids from
+`outliers[].cohort_trace_ids`). When `first_user_message` is available, prefer the cohort request
+with the most word overlap; otherwise the same tool signature. Name the first step where the two
+diverge and what the cohort did differently (index chosen, filter used, function avoided). If every
+cohort request is equally heavy, the task is hard, not the run.
+
+Classification, once per signature, always with numbers (calls, median, threshold, cohort medians)
+and quoted digests:
+
+- `discovery_loop`: mostly `same_target_params_vary` and the cohort reached the answer in fewer
+  steps. Kind `discovery_loop`. Strong when the same target index recurs in 2+ outliers.
+- `recovery_loop`: mostly `retry_after_error`. Kind `loop`. Confirmed when the error signature is
+  identical across repeats.
+- `multi_step_task`: mostly `new_target`, or the cohort is equally heavy. Kind `loop`, Suggestive,
+  `ki_usefulness: unlikely`.
+- `multi_turn_followup`: a conversation with several small requests (see T11 `counts`). Not a
+  finding.
+- `unclear`: content unavailable. Reported, capped at Suggestive.
+
+A pattern seen in one request stays under "Rare in this range" with no deeper analysis.
+
+## Ad hoc follow-ups
+
+Any extra question the user asks runs through `platform.core.execute_esql` against the index in
+`traces_index`, scoped with `WHERE trace_id IN (...)` from `sample_trace_ids` or with the same
+agent id and time range, and is labelled ad hoc in the answer. Content longer than 1024 chars is
+null in ES|QL (`ignore_above`); use the `detail` you already have rather than re-querying it.

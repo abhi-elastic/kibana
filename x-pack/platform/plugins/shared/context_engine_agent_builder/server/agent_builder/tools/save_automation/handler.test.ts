@@ -8,7 +8,10 @@
 import { ATTACHMENT_REF_ACTOR } from '@kbn/agent-builder-common/attachments';
 import { httpServerMock } from '@kbn/core-http-server-mocks';
 import { loggingSystemMock } from '@kbn/core/server/mocks';
-import { AI_INDEX_ATTACHMENT_TYPE } from '../../../../common/agent_builder_attachments';
+import {
+  AI_INDEX_ATTACHMENT_TYPE,
+  INVESTIGATION_ATTACHMENT_TYPE,
+} from '../../../../common/agent_builder_attachments';
 import { MAX_AI_INDEX_AUTOMATIONS } from '@kbn/context-engine-plugin/common/constants';
 import {
   AiIndexConflictError,
@@ -16,6 +19,8 @@ import {
 } from '@kbn/context-engine-plugin/server/ai_indices/errors';
 import type { AiIndexService } from '@kbn/context-engine-plugin/server/ai_indices/service';
 import {
+  isPlaceholderValue,
+  normalizeSaveAutomationParams,
   parseWorkflowNameFromYaml,
   resolveAiIndexIdFromAttachments,
   saveAutomationHandler,
@@ -61,6 +66,51 @@ const createAttachmentStateManager = ({
     },
   ]),
   updateOrigin: jest.fn().mockResolvedValue(true),
+});
+
+describe('normalizeSaveAutomationParams', () => {
+  it.each(['', '  ', '/', '-', '_', '.', 'null', 'NULL', 'undefined', 'none', 'N/A', undefined])(
+    'treats %p as a placeholder',
+    (value) => {
+      expect(isPlaceholderValue(value)).toBe(true);
+    }
+  );
+
+  it.each(['wf-1', 'airline-targeted-ki-writer', '963ac884-d9d6-4ffd-8922-f57dec23bd3f', 'a/b'])(
+    'keeps %p as a real value',
+    (value) => {
+      expect(isPlaceholderValue(value)).toBe(false);
+    }
+  );
+
+  it('drops the placeholder side of the workflow xor', () => {
+    expect(
+      normalizeSaveAutomationParams({ workflowAttachmentId: 'att-1', workflowId: '/' })
+    ).toEqual({ workflowAttachmentId: 'att-1', planIds: [] });
+    expect(normalizeSaveAutomationParams({ workflowAttachmentId: '', workflowId: 'wf-1' })).toEqual(
+      {
+        workflowId: 'wf-1',
+        planIds: [],
+      }
+    );
+  });
+
+  it('treats a workflowId equal to the attachment id as the attachment reference', () => {
+    expect(
+      normalizeSaveAutomationParams({ workflowAttachmentId: 'wf-1', workflowId: 'wf-1' })
+    ).toEqual({ workflowAttachmentId: 'wf-1', planIds: [] });
+  });
+
+  it('merges planId and planIds, trims, deduplicates and drops placeholders', () => {
+    expect(
+      normalizeSaveAutomationParams({
+        workflowId: 'wf-1',
+        planId: ' ki-a ',
+        planIds: ['ki-a', 'ki-b', '/', ''],
+        aiIndexId: '/',
+      })
+    ).toEqual({ workflowId: 'wf-1', planIds: ['ki-a', 'ki-b'] });
+  });
 });
 
 describe('resolveAiIndexIdFromAttachments', () => {
@@ -311,6 +361,169 @@ describe('saveAutomationHandler', () => {
     });
     expect(workflowsManagement.getWorkflow).toHaveBeenCalledWith('wf-new', 'default');
     expect(workflowsManagement.createWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('links the saved workflow to the plan item and versions the investigation attachment', async () => {
+    aiIndexService.addAutomation.mockResolvedValue('attached');
+    const investigationData = {
+      investigation_id: 'inv-1',
+      ai_index_id: 'my-ai-index',
+      stage: 'planned',
+      scope: { mode: 'sources', sources: [] },
+      prior_decisions: [],
+      findings: [],
+      decisions: [],
+      strategy: { shape: 'none', families: [], targeted_kis: [], cost_estimate: '', rationale: '' },
+      plan: { workflows: [], targeted_kis: [] },
+    };
+    const investigationAttachment = {
+      id: 'investigation-attachment',
+      type: INVESTIGATION_ATTACHMENT_TYPE,
+      current_version: 1,
+      versions: [{ version: 1, data: investigationData }],
+    };
+    const base = createAttachmentStateManager();
+    const attachments = {
+      ...base,
+      getAll: jest.fn().mockReturnValue([...base.getAll(), investigationAttachment]),
+      getActive: jest.fn().mockReturnValue([investigationAttachment]),
+      update: jest.fn().mockResolvedValue({ current_version: 2 }),
+    };
+    const generated = {
+      ...investigationData,
+      doc_type: 'investigation',
+      stage: 'generated',
+      finding_ids: [],
+      plan: { workflows: [{ plan_item_id: 'w-1', workflow_id: 'wf-new' }], targeted_kis: [] },
+    };
+    const findingsService = {
+      recordOutcome: jest.fn().mockResolvedValue({ investigation: generated, findings: [] }),
+      getFindings: jest.fn().mockResolvedValue([]),
+      priorDecisions: jest.fn().mockResolvedValue([]),
+    };
+
+    const result = await saveAutomationHandler({
+      params: { workflowId: 'wf-new', planId: 'w-1' },
+      request,
+      spaceId: 'default',
+      attachments: attachments as never,
+      logger,
+      getAiIndexService: async () => aiIndexService as unknown as AiIndexService,
+      getFindingsService: async () => findingsService as never,
+      getCoreStart,
+      getSecurityStart,
+      getWorkflowsManagement: () => workflowsManagement as never,
+    });
+
+    expect(findingsService.recordOutcome).toHaveBeenCalledWith({
+      investigationId: 'inv-1',
+      planItemId: 'w-1',
+      workflowId: 'wf-new',
+    });
+    expect(attachments.update).toHaveBeenCalledWith(
+      'investigation-attachment',
+      { data: expect.objectContaining({ stage: 'generated' }) },
+      ATTACHMENT_REF_ACTOR.agent
+    );
+    expect(result).toEqual({
+      aiIndexId: 'my-ai-index',
+      workflowId: 'wf-new',
+      status: 'attached',
+      plan: { planIds: ['w-1'], investigationId: 'inv-1', stage: 'generated' },
+    });
+  });
+
+  it('links one workflow to several plan items and ignores placeholder values', async () => {
+    aiIndexService.addAutomation.mockResolvedValue('attached');
+    const investigationData = {
+      investigation_id: 'inv-1',
+      ai_index_id: 'my-ai-index',
+      stage: 'planned',
+      scope: { mode: 'sources', sources: [] },
+      prior_decisions: [],
+      findings: [],
+      decisions: [],
+      strategy: { shape: 'none', families: [], targeted_kis: [], cost_estimate: '', rationale: '' },
+      plan: { workflows: [], targeted_kis: [] },
+    };
+    const investigationAttachment = {
+      id: 'investigation-attachment',
+      type: INVESTIGATION_ATTACHMENT_TYPE,
+      current_version: 1,
+      versions: [{ version: 1, data: investigationData }],
+    };
+    const base = createAttachmentStateManager();
+    const attachments = {
+      ...base,
+      getAll: jest.fn().mockReturnValue([...base.getAll(), investigationAttachment]),
+      getActive: jest.fn().mockReturnValue([investigationAttachment]),
+      update: jest.fn().mockResolvedValue({ current_version: 2 }),
+    };
+    const generated = {
+      ...investigationData,
+      doc_type: 'investigation',
+      stage: 'generated',
+      finding_ids: [],
+    };
+    const findingsService = {
+      recordOutcome: jest.fn().mockResolvedValue({ investigation: generated, findings: [] }),
+      getFindings: jest.fn().mockResolvedValue([]),
+      priorDecisions: jest.fn().mockResolvedValue([]),
+    };
+
+    const result = await saveAutomationHandler({
+      params: {
+        workflowId: 'wf-new',
+        workflowAttachmentId: '/',
+        planId: 'ki-a',
+        planIds: ['ki-a', 'ki-b', ''],
+      },
+      request,
+      spaceId: 'default',
+      attachments: attachments as never,
+      logger,
+      getAiIndexService: async () => aiIndexService as unknown as AiIndexService,
+      getFindingsService: async () => findingsService as never,
+      getCoreStart,
+      getSecurityStart,
+      getWorkflowsManagement: () => workflowsManagement as never,
+    });
+
+    expect(findingsService.recordOutcome).toHaveBeenCalledTimes(2);
+    expect(findingsService.recordOutcome).toHaveBeenNthCalledWith(1, {
+      investigationId: 'inv-1',
+      planItemId: 'ki-a',
+      workflowId: 'wf-new',
+    });
+    expect(findingsService.recordOutcome).toHaveBeenNthCalledWith(2, {
+      investigationId: 'inv-1',
+      planItemId: 'ki-b',
+      workflowId: 'wf-new',
+    });
+    expect(attachments.update).toHaveBeenCalledTimes(1);
+    expect(result.plan).toEqual({
+      planIds: ['ki-a', 'ki-b'],
+      investigationId: 'inv-1',
+      stage: 'generated',
+    });
+  });
+
+  it('rejects planId when the findings store is not wired', async () => {
+    aiIndexService.addAutomation.mockResolvedValue('attached');
+
+    await expect(
+      saveAutomationHandler({
+        params: { workflowId: 'wf-new', planId: 'w-1' },
+        request,
+        spaceId: 'default',
+        attachments: createAttachmentStateManager() as never,
+        logger,
+        getAiIndexService: async () => aiIndexService as unknown as AiIndexService,
+        getCoreStart,
+        getSecurityStart,
+        getWorkflowsManagement: () => workflowsManagement as never,
+      })
+    ).rejects.toThrow(/findings store is not available/);
   });
 
   it('rejects attaching a workflow id that does not exist', async () => {

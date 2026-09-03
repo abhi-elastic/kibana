@@ -23,12 +23,15 @@ import { KI_SUMMARY_PAGE_SIZE } from '../../../common/constants';
 import {
   AutomationsPanel,
   DescriptionPanel,
+  InvestigationScopePanel,
   SignalsPanel,
   SourcesPanel,
+  StorageTypePanel,
 } from '../components/ai_index_detail';
 import { KiListPanel } from '../components/ki';
 import { EditSourcesFlyout } from '../components/edit_sources_flyout';
 import { useAiIndex } from '../hooks/use_ai_index';
+import { useGuidedInvestigationEnabled } from '../hooks/use_guided_investigation_enabled';
 import { useKiList } from '../hooks/use_ki_list';
 import { useNavigation } from '../hooks/use_navigation';
 import { ContextEngineSubPageHeader } from '../layout/context_engine_page_header';
@@ -54,6 +57,7 @@ export const AiIndexDetailPage = () => {
   const { createContextEngineUrl, navigateToContextEngine } = useNavigation();
   const [isEditingSources, setIsEditingSources] = useState(false);
   const [selectedTab, setSelectedTab] = useState<DetailTabId>('overview');
+  const isGuidedInvestigationEnabled = useGuidedInvestigationEnabled();
 
   const { summary } = useKiList({
     aiIndexId: aiIndex?.id,
@@ -140,12 +144,30 @@ export const AiIndexDetailPage = () => {
             isManaged={isManaged}
           />
           <EuiSpacer size="m" />
-          <SourcesPanel
+          {isGuidedInvestigationEnabled ? (
+            <InvestigationScopePanel
+              isLoading={isLoading}
+              aiIndex={aiIndex}
+              isManaged={hideEditControls}
+              onEditSources={() => setIsEditingSources(true)}
+              onChanged={refetch}
+            />
+          ) : (
+            <SourcesPanel
+              isLoading={isLoading}
+              sources={aiIndex?.sources ?? []}
+              canEdit={aiIndex !== undefined}
+              onEditSources={() => setIsEditingSources(true)}
+              isManaged={hideEditControls}
+            />
+          )}
+          <EuiSpacer size="m" />
+          <StorageTypePanel
             isLoading={isLoading}
-            sources={aiIndex?.sources ?? []}
-            canEdit={aiIndex !== undefined}
-            onEditSources={() => setIsEditingSources(true)}
-            isManaged={hideEditControls}
+            aiIndex={aiIndex}
+            hasKis={summary.total > 0}
+            onSaved={refetch}
+            isManaged={isManaged}
           />
           <EuiSpacer size="m" />
           <AutomationsPanel
@@ -153,6 +175,7 @@ export const AiIndexDetailPage = () => {
             aiIndex={aiIndex}
             onSaved={refetch}
             isManaged={isManaged}
+            hideSuggestAutomation={isGuidedInvestigationEnabled}
           />
           <EuiSpacer size="m" />
           <SignalsPanel isLoading={isLoading} aiIndex={aiIndex} />

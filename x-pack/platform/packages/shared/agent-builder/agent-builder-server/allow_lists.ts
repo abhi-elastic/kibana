@@ -113,6 +113,7 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
 
   // Platform – Context Engine
   `${internalNamespaces.platformContextEngine}.save_automation`,
+  `${internalNamespaces.platformContextEngine}.record_investigation`,
 
   // Workflows
   `${internalNamespaces.workflows}.validate_workflow`,
@@ -155,6 +156,7 @@ export const AGENT_BUILDER_AGENT_TYPES = [
   `${internalNamespaces.platformSignificantEvents}.investigation-type`,
   `${internalNamespaces.platformSignificantEvents}.discovery-type`,
   `${internalNamespaces.security}.alertzero-type`,
+  `${internalNamespaces.platformContextEngine}.investigation-type`,
 ] as const;
 
 export type AgentBuilderAgentType = (typeof AGENT_BUILDER_AGENT_TYPES)[number];
@@ -207,6 +209,8 @@ export const AGENT_BUILDER_BUILTIN_SKILLS = [
   // Platform – Context Engine
   'ki-automation-generation',
   'ki-retrieval',
+  'ki-investigation',
+  'ki-opportunity-planner',
 
   // Platform – Workflows
   'workflow-authoring',
@@ -318,6 +322,7 @@ export const AGENT_BUILDER_BUILTIN_ATTACHMENTS = [
 
   // Platform – Context Engine
   'platform.context_engine.ai_index',
+  'platform.context_engine.investigation',
 
   // Platform – Cases
   'case',

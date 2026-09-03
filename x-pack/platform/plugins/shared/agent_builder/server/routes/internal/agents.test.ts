@@ -13,6 +13,7 @@ import type { RouteDependencies } from '../types';
 import { internalApiPath } from '../../../common/constants';
 import type {
   GetAgentAiIndicesResponse,
+  GetAgentTypeBaseResponse,
   ListAgentAiIndicesResponse,
 } from '../../../common/http_api/agents';
 
@@ -23,6 +24,7 @@ describe('registerInternalAgentRoutes - agent AI indices', () => {
   let mockList: jest.Mock;
   let mockGet: jest.Mock;
   let mockResolveBase: jest.Mock;
+  let mockGetAgentType: jest.Mock;
 
   const createMockContext = (contextEngineEnabled: boolean) => ({
     core: Promise.resolve({
@@ -81,11 +83,13 @@ describe('registerInternalAgentRoutes - agent AI indices', () => {
     mockResolveBase = jest.fn(async ({ agentType }) =>
       agentType === 'chat' ? { ai_indices: ['elastic'] } : { ai_indices: ['another-one'] }
     );
+    mockGetAgentType = jest.fn().mockReturnValue(undefined);
 
     const getInternalServices = jest.fn().mockReturnValue({
       agents: {
         getRegistry: jest.fn().mockResolvedValue({ list: mockList, get: mockGet }),
         resolveAgentBaseConfiguration: mockResolveBase,
+        getAgentType: mockGetAgentType,
       },
     });
 
@@ -204,6 +208,51 @@ describe('registerInternalAgentRoutes - agent AI indices', () => {
           agent_type: 'chat',
         },
       ]);
+    });
+  });
+
+  describe('GET /agents/{id}/_type_base', () => {
+    const callTypeBase = (id = 'chat-agent') =>
+      handlers.get(`${internalApiPath}/agents/{id}/_type_base`)!(
+        createMockContext(false),
+        { params: { id } },
+        mockResponse
+      ) as Promise<{ type: string; body: GetAgentTypeBaseResponse }>;
+
+    it('returns the tools and skills the agent type contributes, with the type name', async () => {
+      mockGet.mockResolvedValue({
+        id: 'ce-agent',
+        type: 'platform.context_engine.investigation-type',
+        configuration: { tools: [], skill_ids: [] },
+      });
+      mockResolveBase.mockResolvedValue({
+        tools: [{ tool_ids: ['platform.core.execute_esql'] }],
+        skill_ids: ['ki-investigation'],
+        ai_indices: [],
+      });
+      mockGetAgentType.mockReturnValue({ id: 'x', name: 'Context Engine agent' });
+
+      const result = await callTypeBase('ce-agent');
+
+      expect(mockGet).toHaveBeenCalledWith('ce-agent');
+      expect(mockResolveBase).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: 'platform.context_engine.investigation-type' })
+      );
+      expect(result.body).toEqual({
+        agent_type: 'platform.context_engine.investigation-type',
+        agent_type_name: 'Context Engine agent',
+        tools: [{ tool_ids: ['platform.core.execute_esql'] }],
+        skill_ids: ['ki-investigation'],
+      });
+    });
+
+    it('is not gated on the Context Engine and returns empty lists for a type without a base', async () => {
+      mockResolveBase.mockResolvedValue(undefined);
+
+      const result = await callTypeBase();
+
+      expect(result.type).toBe('ok');
+      expect(result.body).toEqual({ agent_type: 'chat', tools: [], skill_ids: [] });
     });
   });
 });

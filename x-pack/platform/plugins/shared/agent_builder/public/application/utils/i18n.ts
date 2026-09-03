@@ -1369,6 +1369,18 @@ export const labels = {
           'This built-in skill is automatically included because Elastic Capabilities is enabled for this agent.',
       }
     ),
+    inheritedFromTypeBadge: i18n.translate(
+      'xpack.agentBuilder.agentSkills.inheritedFromTypeBadge',
+      {
+        defaultMessage: 'From agent type',
+      }
+    ),
+    inheritedFromTypeTooltip: (typeName: string) =>
+      i18n.translate('xpack.agentBuilder.agentSkills.inheritedFromTypeTooltip', {
+        defaultMessage:
+          'This skill comes from the {typeName} agent type. It is always active and cannot be removed here.',
+        values: { typeName },
+      }),
     elasticCapabilitiesReadOnlyBadge: i18n.translate(
       'xpack.agentBuilder.agentSkills.elasticCapabilitiesReadOnlyBadge',
       {
@@ -1931,6 +1943,21 @@ export const labels = {
       {
         defaultMessage:
           'This built-in tool is automatically included because Elastic Capabilities is enabled for this agent.',
+      }
+    ),
+    inheritedFromTypeBadge: i18n.translate('xpack.agentBuilder.agentTools.inheritedFromTypeBadge', {
+      defaultMessage: 'From agent type',
+    }),
+    inheritedFromTypeTooltip: (typeName: string) =>
+      i18n.translate('xpack.agentBuilder.agentTools.inheritedFromTypeTooltip', {
+        defaultMessage:
+          'This tool comes from the {typeName} agent type. It is always active and cannot be removed here.',
+        values: { typeName },
+      }),
+    loadInheritedErrorMessage: i18n.translate(
+      'xpack.agentBuilder.agentTools.loadInheritedErrorMessage',
+      {
+        defaultMessage: 'Failed to fetch the tools and skills this agent inherits from its type',
       }
     ),
     elasticCapabilitiesReadOnlyBadge: i18n.translate(

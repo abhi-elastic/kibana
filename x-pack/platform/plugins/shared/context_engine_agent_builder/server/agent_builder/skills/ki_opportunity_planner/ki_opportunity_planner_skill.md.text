@@ -1,0 +1,100 @@
+## Task
+
+Turn the approved context strategy in the `platform.context_engine.investigation` attachment
+(stage `strategy_approved`) into a plan: one workflow spec per approved family, and one targeted
+KI spec, with the KI content authored here, per finding the user chose `create_ki` or
+`create_ki_and_signal` for. Record it with `record_investigation(action: plan)`. You decide shapes
+and author KIs; you never write workflow YAML, never revisit the unit of context, and never
+propose new findings.
+
+Read `strategy_catalog` for the family fields and the three shapes, and `ki_shapes` for the KI
+document shape and the targeted KI types. Read them before writing the first spec. `glossary`
+gives the one-clause meaning of every term you show the user; the first use of a KI type,
+extraction, freshness or readiness value in a message carries it in parentheses.
+
+## Inputs you rely on
+
+From the attachment: `access_mode`, probes, measurements, the findings table with decisions, the
+strategy (shape, families, targeted KIs, rationale), the investigation scope (sources with their
+ES|QL). Tools: `platform.core.execute_esql` for unit counts and samples,
+`platform.core.get_index_mapping` for field names, `platform.context_engine.record_investigation`.
+
+## Rules
+
+- Plan only what was approved. Every workflow spec maps to a family in the strategy; every
+  targeted KI spec maps to a `targeted_kis` entry whose finding has a `create_ki*` decision.
+  Dismissed, suppressed and below-gate findings are never planned unless their decision is
+  `create_ki*`. `known_issue` findings get no KI; list them in the closing message as
+  documentation notes.
+- Unit count is deterministic: run `FROM <source> | STATS units = COUNT_DISTINCT(<unit_key>)` (or
+  the index count when `unit_key` is `index`) with the corpus filter applied. If it differs from
+  the strategy's count by more than 10%, say so in the spec and use the measured number.
+- Corpus filter is mandatory on every per-unit spec: a time window, a status condition or a
+  numeric cap, chosen from the freshness and spread measurements. State it in the spec; the
+  generation stage puts it in the source query.
+- `text_only` access mode: no `query_ready` specs, no KI whose content is an index name or a
+  query; a targeted KI is then a `fact` or a `constraint` stated in words.
+- Field names come from `get_index_mapping` or the samples, never from memory.
+- Signal: a targeted KI whose decision is `create_ki_and_signal` is marked `signal: true` in its
+  spec so the generation stage dual-writes it. Only observed findings can carry it.
+- Do not author family KI content. The workflow's `ai.prompt` (LLM extraction) or field copy
+  (mechanical extraction) produces it per unit; your spec says what one KI carries.
+
+## Procedure
+
+1. Read the strategy and decisions from the attachment. If the stage is not `strategy_approved`,
+   stop and say which stage it is; the stage router owns the hand-off.
+2. For each family, sample 3 units (`FROM <source> | WHERE <corpus filter> | LIMIT 3`, keeping
+   the unit key and the long-text fields the strategy said the KI carries), confirm the field
+   names against the mapping, and run the unit count. Then write the workflow spec:
+   - `plan_item_id`: `wf-<family_id>`; `family_id`; `name`: "<family> KIs for <ai_index_id>".
+   - `unit_key`; `foreach`: the enumeration in one sentence with the query
+     ("foreach row of `FROM cases | WHERE status == "resolved" AND updated_at > NOW() - 90 days
+     | STATS BY case_id | LIMIT 1000`").
+   - `freshness_cursor`: the field to cursor on when `freshness` is `cursor` (e.g.
+     `updated_at`); omit when `static`.
+   - `readiness` copied from the family.
+   - `spec`: the prose the generation stage builds from, in this order: source query with the
+     corpus filter; per-unit fetch (fields, joins, `LIMIT` per unit from the fan-out
+     measurement); extraction (`llm` with the fields to synthesise and the target KI content
+     shape from `ki_shapes`, or `mechanical` with the field list); KI schema (`type` = family
+     name, `title` pattern, `description` pattern, `tags` `plan:<plan_item_id>`, `attributes`
+     including `unit_key`, `unit_id`, `readiness`, `plan_id`, `source_query`, `expires_at` when
+     the family expires); access patterns only when `readiness` is `query_ready`; `ki_id`
+     pattern `<family_id>/<unit id>`; cursor handling; trigger (manual unless the freshness
+     measurement asks for a schedule); expected unit count and token estimate.
+3. For each targeted KI, author the KI from the finding's evidence following the type in
+   `ki_shapes` (constraint, workaround, disambiguation, task_recipe, fact). Verify any query you
+   put in `attributes.esql` with `execute_esql` first. Write the spec:
+   - `plan_item_id`: `ki-<finding_id>`; `finding_id`; `ki_type`; `title`; `ki_id`:
+     `targeted/<finding_id>`.
+   - `spec`: the complete KI as a fenced JSON object (`type`, `title`, `description`, `content`,
+     `tags` with `plan:<plan_item_id>` and `finding:<finding_id>`, `attributes` with
+     `plan_id` and `finding_id` (both strings), `trace_ids` (non-empty string array, observed
+     findings) or `source_query` (one ES|QL string, or an array of strings when several queries
+     measured the finding; omit rather than send an empty value), `confidence`, `evidence`,
+     `esql` when it carries a query, `expires_at` when it expires), followed by one line
+     `signal: true` or `signal: false`. Attribute values are strings, numbers, booleans or string
+     arrays; never a nested object.
+4. Present the plan in at most one line per item: workflows as "<name>: <unit_count> units,
+   <extraction>, <freshness>, <readiness>, filter <filter>"; targeted KIs as "<ki_type>
+   <title> (finding <id>)<, signal>"; then the measured token estimate for the pilot (3 units)
+   and for the full run. Before the list, one line defines the values that appear in it, from
+   `glossary` ("llm: a model summarises each unit; cursor: refreshed when the unit changes;
+   constraint: what cannot be done and where the limit is"). Do not repeat a meaning per item.
+5. `ask_user_question`: "Record this plan?" Options: `Record`, `Change a workflow spec`,
+   `Change a targeted KI`, `Drop an item`. Free text allowed. Revise and re-present on any
+   change; on `Drop an item` remove it and say what remains.
+6. Call `record_investigation` with `action: plan` and `{ workflows, targeted_kis }`. `plan_item_id`
+   must be unique across both arrays. On a validation error, fix the field the error names and
+   retry once with the changed object; never resend the same one.
+7. Close with one line (items recorded, known-issue notes if any) and a `confirmation` prompt:
+   "Generate the automations from this plan now?" On yes, the stage router loads
+   `ki-automation-generation`. On no, stop; the plan is saved.
+
+## Output contract
+
+`record_investigation(action: plan)` with `plan.workflows[]` (`plan_item_id`, `family_id`, `name`,
+`unit_key`, `foreach`, `freshness_cursor?`, `readiness`, `spec`) and `plan.targeted_kis[]`
+(`plan_item_id`, `finding_id`, `ki_type`, `title`, `spec`, `ki_id`). A `none` strategy records an
+empty plan and ends the run; say so in one line.

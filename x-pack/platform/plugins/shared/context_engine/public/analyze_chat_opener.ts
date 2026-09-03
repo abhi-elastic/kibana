@@ -9,19 +9,27 @@ import type { AgentBuilderPluginStart } from '@kbn/agent-builder-browser';
 import type { CoreStart } from '@kbn/core/public';
 import { i18n } from '@kbn/i18n';
 import { buildAnalyzeChat as defaultBuildAnalyzeChat } from './analyze_chat';
-import type { AnalyzeAndImproveContext, AnalyzeChatOptions, ChatOpener } from './types';
+import type {
+  AgentBuilderIntegration,
+  AnalyzeAndImproveContext,
+  AnalyzeChatOptions,
+  ChatOpener,
+} from './types';
 
 /**
  * Builds the Analyze & improve chat opener. Returns undefined when Agent Builder is unavailable
- * or the user lacks the `agentBuilder.show` capability.
+ * or the user lacks the `agentBuilder.show` capability. Opens on the configured feedback agent
+ * when there is one, otherwise on the shared Context Engine agent.
  */
 export const createAnalyzeChatOpener = ({
   coreStart,
   agentBuilder,
+  getAgentBuilderIntegration,
   buildAnalyzeChat = defaultBuildAnalyzeChat,
 }: {
   coreStart: CoreStart;
   agentBuilder: AgentBuilderPluginStart | undefined;
+  getAgentBuilderIntegration?: () => AgentBuilderIntegration | undefined;
   buildAnalyzeChat?: (
     context: AnalyzeAndImproveContext
   ) => AnalyzeChatOptions | Promise<AnalyzeChatOptions>;
@@ -45,9 +53,10 @@ export const createAnalyzeChatOpener = ({
       return;
     }
     const options = await buildAnalyzeChat(ctx);
-    if (!options.agentId) {
+    const agentId = options.agentId ?? (await getAgentBuilderIntegration?.()?.ensureAgentId?.());
+    if (!agentId) {
       return;
     }
-    agentBuilder.openChat(options);
+    agentBuilder.openChat({ ...options, agentId });
   };
 };

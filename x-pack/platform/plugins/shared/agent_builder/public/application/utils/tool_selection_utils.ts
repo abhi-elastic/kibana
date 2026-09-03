@@ -13,6 +13,8 @@ import type {
 import { allToolsSelectionWildcard, toolMatchSelection } from '@kbn/agent-builder-common';
 import type { AgentEditState } from '../hooks/agents/use_agent_edit';
 
+const EMPTY_ID_SET: ReadonlySet<string> = new Set<string>();
+
 /**
  * Check if a specific tool is selected based on the current tool selections.
  * This uses existing agent-builder-common utilities for consistent logic.
@@ -102,17 +104,33 @@ export const getActiveTools = <T extends ToolSelectionRelevantFields>(
   allTools: T[],
   agentToolSelections: ToolSelection[],
   enableElasticCapabilities: boolean,
-  defaultToolIds: Set<string>
+  defaultToolIds: Set<string>,
+  inheritedToolIds: ReadonlySet<string> = EMPTY_ID_SET
 ): T[] => {
   const explicitTools = allTools.filter((t) => isToolSelected(t, agentToolSelections));
-  if (enableElasticCapabilities) {
-    const explicitIdSet = new Set(explicitTools.map((t) => t.id));
-    const defaultToolsNotExplicit = allTools.filter(
-      (t) => defaultToolIds.has(t.id) && !explicitIdSet.has(t.id)
-    );
-    return [...explicitTools, ...defaultToolsNotExplicit];
+  const explicitIdSet = new Set(explicitTools.map((t) => t.id));
+  const implicitTools = allTools.filter(
+    (t) =>
+      !explicitIdSet.has(t.id) &&
+      ((enableElasticCapabilities && defaultToolIds.has(t.id)) || inheritedToolIds.has(t.id))
+  );
+  return implicitTools.length > 0 ? [...explicitTools, ...implicitTools] : explicitTools;
+};
+
+/**
+ * Resolves the tool selections an agent inherits from its type to the ids of the known tools
+ * they match, so consumers can treat them like any other locked set.
+ */
+export const getInheritedToolIdSet = <T extends ToolSelectionRelevantFields>(
+  allTools: T[],
+  inheritedSelections: ToolSelection[]
+): Set<string> => {
+  if (inheritedSelections.length === 0) {
+    return new Set<string>();
   }
-  return explicitTools;
+  return new Set(
+    allTools.filter((tool) => isToolSelected(tool, inheritedSelections)).map((tool) => tool.id)
+  );
 };
 
 /**
@@ -136,15 +154,17 @@ export const getActiveSkills = <
 >(
   allSkills: T[],
   agentSkillIds: string[] | undefined,
-  enableElasticCapabilities: boolean
+  enableElasticCapabilities: boolean,
+  inheritedSkillIds: ReadonlySet<string> = EMPTY_ID_SET
 ): T[] => {
   const explicitIds = new Set(agentSkillIds ?? []);
   const explicitSkills = allSkills.filter((s) => explicitIds.has(s.id));
-  if (!enableElasticCapabilities) return explicitSkills;
-  const builtinNotExplicit = allSkills.filter(
-    (skill) => isSkillAutoIncluded(skill, enableElasticCapabilities) && !explicitIds.has(skill.id)
+  const implicitSkills = allSkills.filter(
+    (skill) =>
+      !explicitIds.has(skill.id) &&
+      (isSkillAutoIncluded(skill, enableElasticCapabilities) || inheritedSkillIds.has(skill.id))
   );
-  return [...explicitSkills, ...builtinNotExplicit];
+  return implicitSkills.length > 0 ? [...explicitSkills, ...implicitSkills] : explicitSkills;
 };
 
 /**

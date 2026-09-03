@@ -73,12 +73,42 @@ export interface AiIndexFeedbackAnalysis {
   allowed_actions?: ImprovementAction[];
 }
 
+/**
+ * What the guided investigation may inspect: the configured `sources`, the
+ * agent traces of a selected agent, or both.
+ */
+export type AiIndexInvestigationMode = 'sources' | 'traces' | 'both';
+
+/**
+ * Which traces an investigation reads. `agent_id` is the raw
+ * `attributes.gen_ai.agent.id` observed in traces; `esql` is an optional custom
+ * query that replaces the agent/time-range filter when set. `from`/`to` are
+ * date math or ISO dates, evaluated when the investigation runs.
+ */
+export interface AiIndexInvestigationTraceScope {
+  agent_id?: string;
+  time_range: { from: string; to: string };
+  esql?: string;
+}
+
+/**
+ * Per-index scope for the guided investigation. Sources continue to live in
+ * `sources[]`; this block only adds the mode and the trace selection. It is
+ * saved as the user edits it, so it may be incomplete (a trace mode with no
+ * agent yet); completeness is checked when an investigation is run.
+ */
+export interface AiIndexInvestigationScope {
+  mode: AiIndexInvestigationMode;
+  trace?: AiIndexInvestigationTraceScope;
+}
+
 export interface AiIndexProperties {
   description?: string;
   dest: AiIndexDest;
   automations: AiIndexAutomation[];
   sources: AiIndexSource[];
   feedback_analysis?: AiIndexFeedbackAnalysis;
+  investigation_scope?: AiIndexInvestigationScope;
 }
 
 export interface AiIndexHttpItem extends AiIndexProperties {
@@ -103,6 +133,12 @@ export type PutAiIndexFeedbackAnalysisRequest = AiIndexFeedbackAnalysis;
 export interface PutAiIndexFeedbackAnalysisResponse {
   /** The stored block with defaults resolved, so callers see what will actually run. */
   feedback_analysis: AiIndexFeedbackAnalysis;
+}
+
+export type PutAiIndexInvestigationScopeRequest = AiIndexInvestigationScope;
+
+export interface PutAiIndexInvestigationScopeResponse {
+  investigation_scope: AiIndexInvestigationScope;
 }
 
 export interface CreateAiIndexResponse {

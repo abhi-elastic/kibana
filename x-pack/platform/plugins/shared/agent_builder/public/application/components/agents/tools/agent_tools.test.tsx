@@ -63,16 +63,22 @@ jest.mock('./tools_customize_empty_state', () => ({
 }));
 
 jest.mock('../common/active_item_row', () => ({
-  ActiveItemRow: () => <div data-test-subj="activeItemRow" />,
+  ActiveItemRow: ({ id, readOnlyContent }: { id: string; readOnlyContent?: React.ReactNode }) => (
+    <div data-test-subj="activeItemRow" data-tool-id={id}>
+      {readOnlyContent}
+    </div>
+  ),
 }));
 
 jest.mock('../../../hooks/agents/use_agent_by_id');
 jest.mock('../../../hooks/agents/use_can_update_agent');
+jest.mock('../../../hooks/agents/use_agent_type_base');
 jest.mock('../../../hooks/tools/use_tools');
 jest.mock('./use_tools_mutation');
 
 const { useAgentBuilderAgentById } = jest.requireMock('../../../hooks/agents/use_agent_by_id');
 const { useCanUpdateAgent } = jest.requireMock('../../../hooks/agents/use_can_update_agent');
+const { useAgentTypeBase } = jest.requireMock('../../../hooks/agents/use_agent_type_base');
 const { useToolsService } = jest.requireMock('../../../hooks/tools/use_tools');
 const { useToolsMutation } = jest.requireMock('./use_tools_mutation');
 const { useQueryState } = jest.requireMock('../../../hooks/use_query_state');
@@ -110,6 +116,8 @@ describe('AgentTools', () => {
     });
 
     useCanUpdateAgent.mockReturnValue(true);
+
+    useAgentTypeBase.mockReturnValue({ typeBase: undefined, isLoading: false });
 
     useToolsService.mockReturnValue({
       tools: [{ id: 'tool-1', description: 'Tool 1', tags: [] }],
@@ -189,5 +197,30 @@ describe('AgentTools', () => {
     useCanUpdateAgent.mockReturnValue(false);
     renderComponent();
     expect(screen.queryByRole('button', { name: 'Add tool' })).not.toBeInTheDocument();
+  });
+
+  it('lists tools inherited from the agent type as active and locked', () => {
+    useToolsService.mockReturnValue({
+      tools: [
+        { id: 'tool-1', description: 'Tool 1', tags: [] },
+        { id: 'platform.core.execute_esql', description: 'ES|QL', tags: [] },
+      ],
+      isLoading: false,
+    });
+    useAgentTypeBase.mockReturnValue({
+      typeBase: {
+        typeName: 'Context Engine agent',
+        tools: [{ tool_ids: ['platform.core.execute_esql'] }],
+        skillIds: [],
+      },
+      isLoading: false,
+    });
+
+    renderComponent();
+
+    expect(screen.getAllByTestId('activeItemRow')).toHaveLength(2);
+    expect(
+      screen.getByTestId('agentBuilderInheritedTool-platform.core.execute_esql')
+    ).toHaveTextContent('From agent type');
   });
 });
